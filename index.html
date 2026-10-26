@@ -1292,7 +1292,11 @@ function animateCore(viaRaf) {
   // 遮罩只在 rAF 驱动并渲染两帧后揭开：rAF 被挂起时（内嵌 webview 后台节流）
   // 看门狗帧虽执行了 WebGL 命令，合成器却未必上屏，提前揭罩就会露出黑画布
   const veilEl = document.getElementById('veil');   // ?bare 模式下遮罩被移除，需判空
-  if (veilEl && viaRaf && rafFrames >= 2) veilEl.classList.add('hide');
+  if (veilEl && viaRaf && rafFrames >= 2 && !veilEl.classList.contains('hide')) {
+    veilEl.classList.add('hide');
+    const w = document.getElementById('veilWait');
+    if (w) w.style.display = 'none';
+  }
 }
 
 // —— 帧调度：同步首帧 + 单飞 rAF + 看门狗 ——
