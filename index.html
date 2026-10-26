@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>夕帆 · Sunset Galleon — 夕阳海面帆船 3D 动画</title>
+<style>
+  :root { --ink: rgba(255, 246, 232, .93); --ink-dim: rgba(255, 231, 205, .55); --line: rgba(255, 214, 170, .35); }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1512; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+  canvas { display: block; }
+
+  #ui { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #ui > * { position: absolute; }
+
+  .title { top: 22px; left: 26px; color: var(--ink); text-shadow: 0 1px 14px rgba(60, 20, 0, .55); }
+  .title h1 { font-size: 17px; font-weight: 600; letter-spacing: .35em; }
+  .title p { margin-top: 5px; font-size: 11px; letter-spacing: .12em; color: var(--ink-dim); }
+
+  .shot { right: 26px; bottom: 24px; text-align: right; color: var(--ink); text-shadow: 0 1px 10px rgba(60, 20, 0, .6); transition: opacity .6s; }
+  .shot .name { font-size: 13px; letter-spacing: .25em; }
+  .shot .idx { margin-top: 4px; font-size: 10px; letter-spacing: .3em; color: var(--ink-dim); }
+
+  .panel { left: 26px; bottom: 22px; display: flex; gap: 8px; pointer-events: auto; }
+  .btn { appearance: none; border: 1px solid var(--line); background: rgba(30, 16, 8, .30); color: var(--ink);
+         font: 500 11px/1 inherit; letter-spacing: .15em; padding: 8px 13px; border-radius: 999px; cursor: pointer;
+         backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); transition: background .25s, border-color .25s; white-space: nowrap; }
+  .btn:hover { background: rgba(70, 34, 14, .45); border-color: rgba(255, 214, 170, .7); }
+  .btn.on { background: rgba(150, 70, 20, .40); }
+
+  .hint { left: 26px; bottom: 66px; font-size: 10px; letter-spacing: .18em; color: var(--ink-dim);
+           text-shadow: 0 1px 8px rgba(60,20,0,.6); opacity: 0; transition: opacity .5s; }
+  .hint.show { opacity: 1; }
+
+  #fps { top: 24px; right: 26px; font-size: 10px; letter-spacing: .15em; color: var(--ink-dim);
+         font-variant-numeric: tabular-nums; text-shadow: 0 1px 8px rgba(60,20,0,.6); }
+
+  #quote { left: 0; right: 0; bottom: 108px; text-align: center; color: rgba(255,246,232,.90);
+           font-size: 14px; font-weight: 300; letter-spacing: .34em; text-indent: .34em;
+           text-shadow: 0 1px 16px rgba(8,8,18,.60); opacity: 0; transition: opacity 1.8s ease; }
+  #quote.show { opacity: .92; }
+
+  #veil { position: fixed; inset: 0; z-index: 10;
+          /* 首帧即是一幅 CSS 夕阳海面：即使内嵌浏览器呈现层冻结在首帧，看到的也是场景而非黑屏 */
+          background:
+            radial-gradient(ellipse 26px 26px at 66% 66%, rgba(255,236,200,1) 0%, rgba(255,190,110,.9) 34%, rgba(255,140,66,.45) 58%, transparent 74%),
+            linear-gradient(100deg at 66% 130%, rgba(255,170,90,.28) 0%, transparent 34%),
+            linear-gradient(180deg, #23262b 0%, #55423c 34%, #a06442 56%, #d97f42 66%, #ffb26a 71.6%, #7a4527 71.8%, #16303a 76%, #0a161c 100%);
+          display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+          transition: opacity 1.1s ease; color: var(--ink); }
+  #veil .sea { position: absolute; left: 0; right: 0; top: 71.8%; bottom: 0;
+               background: linear-gradient(180deg, #14303a 0%, #0a161c 100%); }
+  #veil .ship { position: absolute; left: 34%; top: 62.5%; width: 120px; height: 64px; opacity: .92; filter: drop-shadow(0 0 6px rgba(255,160,80,.25)); }
+  #veil .ship .s1 { position: absolute; left: 30px; bottom: 16px; width: 0; height: 0;
+                    border-left: 14px solid transparent; border-right: 30px solid transparent; border-bottom: 40px solid #1d130e; }
+  #veil .ship .s2 { position: absolute; left: 66px; bottom: 16px; width: 0; height: 0;
+                    border-left: 22px solid transparent; border-right: 14px solid transparent; border-bottom: 34px solid #221610; }
+  #veil .ship .hull { position: absolute; left: 6px; bottom: 6px; width: 104px; height: 12px; background: #1d130e;
+                      clip-path: polygon(0 0, 100% 0, 92% 100%, 6% 100%); }
+  #veil.hide { opacity: 0; pointer-events: none; }
+  #veil h2 { font-size: 15px; letter-spacing: .5em; font-weight: 500; text-indent: .5em; }
+  #veil .bar { width: 180px; height: 1px; background: rgba(255, 214, 170, .18); overflow: hidden; }
+  #veil .bar i { display: block; height: 100%; width: 40%; background: linear-gradient(90deg, transparent, rgba(255, 190, 130, .9), transparent);
+                 animation: sweep 1.2s ease-in-out infinite; }
+  @keyframes sweep { 0% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+  #veil .err { font-size: 12px; color: #ffb08a; max-width: 70ch; text-align: center; line-height: 1.7; display: none; }
+  #veil .wait { font-size: 12px; color: var(--ink-dim); max-width: 56ch; text-align: center; line-height: 1.8;
+                letter-spacing: .06em; display: none; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+
+<div id="veil">
+  <div class="sea"></div>
+  <div class="ship"><div class="s1"></div><div class="s2"></div><div class="hull"></div></div>
+  <h2>夕 帆</h2>
+  <div class="bar"><i></i></div>
+  <div class="wait" id="veilWait">正在等待浏览器渲染激活 —— 可点击一下画面或稍候片刻；若长时间停留在此画面，请改用 Chrome / Safari 打开本页</div>
+  <div class="err" id="veilErr"></div>
+</div>
+
+<div id="ui">
+  <div class="title">
+    <h1>夕帆 · SUNSET GALLEON</h1>
+    <p>夕阳海面航行帆船 · 复刻 @Da7_Tech 帆船案例 · GLM-5.3</p>
+  </div>
+  <div id="fps"></div>
+  <div class="shot" id="shotCap"><div class="name">—</div><div class="idx">镜头 1 / 4</div></div>
+  <div class="hint" id="hint">自由视角 · 拖拽旋转 / 滚轮缩放 · C 键切回自动运镜</div>
+  <div id="quote"></div>
+  <div class="panel">
+    <button class="btn" id="btnPause">⏸ 暂停</button>
+    <button class="btn" id="btnCam">🎥 自动运镜</button>
+    <button class="btn" id="btnW">🌆 天气 · 晚霞</button>
+    <button class="btn" id="btnB">🎵 音乐 · 开</button>
+    <button class="btn" id="btnQ">✦ 画质 · 高</button>
+  </div>
+</div>
+
+<audio id="bgm" src="bgm.mp3" loop preload="auto"></audio>
+
+<script>
+/* —— 页面级兜底（普通脚本：即便下面的模块因 CDN 失败根本不执行，这里也会跑）—— */
+window.__appReady = false;
+window.__errs = [];
+window.__fail = (msg) => {
+  const v = document.getElementById('veil');
+  if (!v || v.classList.contains('hide')) return;   // 渲染已正常，忽略迟到的错误
+  v.classList.remove('hide');
+  v.querySelector('.bar').style.display = 'none';
+  document.getElementById('veilWait').style.display = 'none';
+  const e = document.getElementById('veilErr');
+  e.style.display = 'block'; e.textContent = msg;
+};
+// 捕获阶段监听：能同时捕获到模块脚本/CDN 加载失败（这类错误不冒泡到 window）
+window.addEventListener('error', (ev) => {
+  const t = ev.target && ev.target.src ? ' 资源：' + ev.target.src : '';
+  window.__fail('加载失败：' + (ev.message || '资源加载错误') + t + ' —— 需联网加载 three.js CDN；若被广告拦截类扩展屏蔽，请用无痕窗口或换浏览器打开。');
+}, true);
+window.addEventListener('unhandledrejection', (e) => window.__fail('脚本异常：' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
+window.addEventListener('error', e => { if (window.__errs.length < 30) window.__errs.push((e.message || String(e)) + ' @' + (e.lineno || 0)); });
+// CDN 探测：7 秒仍未就绪则明确报错，而不是无限停留在加载画面
+setTimeout(() => {
+  if (!window.__appReady) window.__fail('three.js CDN（jsdelivr）加载失败或被扩展拦截。请检查网络后刷新页面，或改用无痕窗口/Chrome/Safari 打开 ' + location.host.replace(/^/, 'http://') + '/');
+}, 7000);
+// 渲染激活探测：脚本就绪但画面迟迟未揭开（rAF 被宿主挂起，常见于内嵌 webview 后台标签）时给出提示，而不是无声黑等
+setInterval(() => {
+  const v = document.getElementById('veil');
+  if (window.__appReady && v && !v.classList.contains('hide') && performance.now() > 6000)
+    document.getElementById('veilWait').style.display = 'block';
+}, 1000);
+// ?bare —— 调试/自动化取景：不显示加载遮罩，直接看场景
+if (location.search.indexOf('bare') >= 0) { const v = document.getElementById('veil'); if (v) v.remove(); }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
+
+/* 页面级兜底（__fail / __errs / CDN 探测 / 渲染激活探测）见上方普通脚本 */
+
+/* ============================================================
+   常量：波浪 / 太阳 / 配色
+   ============================================================ */
+const WAVES = [ // dir, 波长 L, 振幅 A, 陡度因子 q
+  { d: [0.86, 0.51], L: 64.0, A: 0.55, q: 0.90 },
+  { d: [0.92, -0.39], L: 33.0, A: 0.32, q: 0.82 },
+  { d: [0.79, 0.61], L: 18.0, A: 0.19, q: 0.78 },
+  { d: [0.98, 0.19], L: 10.0, A: 0.105, q: 0.70 },
+  { d: [0.66, -0.75], L: 5.6, A: 0.060, q: 0.62 },
+  { d: [0.42, 0.90], L: 3.4, A: 0.034, q: 0.55 },
+];
+const NW = WAVES.length;
+for (const w of WAVES) {
+  const m = Math.hypot(w.d[0], w.d[1]); w.d[0] /= m; w.d[1] /= m;
+  w.k = 2 * Math.PI / w.L;
+  w.w = w.k * Math.sqrt(9.81 / w.k);          // 深水色散
+  w.q /= (w.k * w.A * NW);                     // 归一化避免卷绕
+}
+// CPU 侧同参数的高度采样（供船的浮沉）
+function waveHeight(x, z, t) {
+  let y = 0;
+  for (const w of WAVES) y += w.A * Math.sin(w.k * (w.d[0] * x + w.d[1] * z) - w.w * t);
+  return y;
+}
+const SUM_A = WAVES.reduce((s, w) => s + w.A, 0);
+
+const SUN_DIR = new THREE.Vector3(-0.62, 0.11, -0.75).normalize();
+const SUN_COL = new THREE.Color(1.0, 0.66, 0.36);
+const HAZE_A  = new THREE.Color(0.78, 0.48, 0.30);
+const HAZE_B  = new THREE.Color(1.08, 0.73, 0.42);
+const SKY_HORIZON = new THREE.Color(1.00, 0.60, 0.27);
+const SKY_MID     = new THREE.Color(0.83, 0.54, 0.38);
+const SKY_ZENITH  = new THREE.Color(0.26, 0.265, 0.27);
+const DEEP   = new THREE.Color(0.024, 0.120, 0.140);
+const SHALLOW= new THREE.Color(0.085, 0.330, 0.290);
+const SSS_COL= new THREE.Color(0.10, 0.42, 0.34);
+const CLOUD_A = new THREE.Color(0.98, 0.63, 0.42);   // 云暗面
+const CLOUD_B = new THREE.Color(1.05, 0.83, 0.62);   // 云亮面
+
+const glslWaves = WAVES.map(w => `
+      D=vec2(${w.d[0].toFixed(6)},${w.d[1].toFixed(6)});k=${w.k.toFixed(6)};w=${w.w.toFixed(6)};A=${w.A.toFixed(6)};Q=${w.q.toFixed(6)};
+      f=k*dot(D,p)-w*uTime; S=sin(f); C=cos(f);
+      pos+=vec3(Q*A*D.x*C, A*S, Q*A*D.y*C);
+      T+=vec3(-Q*k*A*D.x*D.x*S, k*A*D.x*C, -Q*k*A*D.x*D.y*S);
+      B+=vec3(-Q*k*A*D.x*D.y*S, k*A*D.y*C, -Q*k*A*D.y*D.y*S);`).join('\n');
+
+const NOISE_GLSL = `
+float hash21(vec2 p){
+  p = mod(p, 4096.0);   // 包裹大坐标：长时间航行后 world 坐标增大，防 fp32 哈希精度崩坏（手机/PC 通用）
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 p){ vec2 i=floor(p),f=fract(p); f=f*f*(3.0-2.0*f);
+  float a=hash21(i),b=hash21(i+vec2(1.,0.)),c=hash21(i+vec2(0.,1.)),d=hash21(i+vec2(1.,1.));
+  return mix(mix(a,b,f.x),mix(c,d,f.x),f.y); }
+float fbm(vec2 p){ float v=0.,a=0.5; for(int i=0;i<4;i++){ v+=a*vnoise(p); p=p*2.03+vec2(17.3,9.1); a*=0.5; } return v; }
+`;
+
+/* ============================================================
+   渲染器 / 场景 / 后期
+   ============================================================ */
+const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.34;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xd9905c, 240, 1500);
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.5, 8000);
+
+const sunLight = new THREE.DirectionalLight(0xffb173, 3.0);
+sunLight.position.copy(SUN_DIR).multiplyScalar(300);
+scene.add(sunLight);
+const hemi = new THREE.HemisphereLight(0x4a5058, 0x0d2830, 0.8);
+scene.add(hemi);
+const ambLight = new THREE.AmbientLight(0x584a3a, 0.4);
+scene.add(ambLight);
+const sternLight = new THREE.PointLight(0xff9c50, 26, 26, 2);
+sternLight.position.set(-6.9, 2.2, 0);
+scene.add(sternLight);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.30, 0.40, 1.0);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const fxaa = new ShaderPass(FXAAShader);
+composer.addPass(fxaa);
+const vignette = new ShaderPass({
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position,1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main(){ vec4 c=texture2D(tDiffuse,vUv);
+      float d=length((vUv-0.5)*vec2(1.15,1.0));
+      c.rgb*=smoothstep(1.05,0.35,d)*0.22+0.80;
+      c.rgb*=vec3(1.03,0.995,0.94);
+      gl_FragColor=c; }`
+});
+composer.addPass(vignette);
+
+/* —— 平面反射：镜像相机渲染到 RT，海洋着色器按波法线扰动采样（船与天空倒影入水）—— */
+const reflRT = new THREE.WebGLRenderTarget(1024, 512);
+const reflCam = new THREE.PerspectiveCamera();
+const reflTexMatrix = new THREE.Matrix4();
+const sideSwap = new Map();
+function flipSides(on) {
+  scene.traverse(o => {
+    const m = o.material; if (!m) return;
+    if (on) {
+      if (sideSwap.has(m)) return;          // 镜像视图翻转绕序：Front/Back 互换
+      sideSwap.set(m, m.side);
+      if (m.side === THREE.FrontSide) m.side = THREE.BackSide;
+      else if (m.side === THREE.BackSide) m.side = THREE.FrontSide;
+    } else {
+      const s = sideSwap.get(m);
+      if (s !== undefined) { m.side = s; sideSwap.delete(m); }
+    }
+  });
+}
+
+/* ============================================================
+   天空
+   ============================================================ */
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide, depthWrite: false, fog: false,
+  uniforms: {
+    uSunDir: { value: SUN_DIR },
+    uSunCol: { value: SUN_COL },
+    uTime: { value: 0 },
+    uHor: { value: SKY_HORIZON }, uMid: { value: SKY_MID }, uZen: { value: SKY_ZENITH },
+    uCloudA: { value: CLOUD_A }, uCloudB: { value: CLOUD_B },
+    uCloudAmt: { value: 0.30 }, uGlow: { value: 0.16 }, uBand: { value: 1.1 },
+    uMoonI: { value: 0 }, uStars: { value: 0 },
+  },
+  vertexShader: `varying vec3 vDir; void main(){ vDir=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform vec3 uSunDir; uniform vec3 uSunCol; uniform float uTime; varying vec3 vDir;
+    uniform vec3 uHor,uMid,uZen,uCloudA,uCloudB; uniform float uCloudAmt,uGlow,uBand,uMoonI,uStars;
+    ${NOISE_GLSL}
+    void main(){
+      vec3 d=normalize(vDir);
+      float h=clamp(d.y,0.0,1.0);
+      vec3 col=mix(uHor,uMid, smoothstep(0.0,0.16,h));
+      col=mix(col, uZen, smoothstep(0.12,0.60,h));
+      float sd=max(dot(d,uSunDir),0.0);
+      col+=uSunCol*pow(sd,220.0)*1.15;                              // 大气晕
+      col+=uSunCol*pow(sd,9.0)*uGlow;                               // 宽域暖光（晚霞时更红更烈）
+      vec3 diskCol=mix(vec3(1.20,0.82,0.52), vec3(0.90,0.94,1.05), uMoonI);
+      col+=diskCol*smoothstep(0.99955,0.99985,sd)*mix(2.4,1.3,uMoonI);      // 日面/月面（HDR，轮廓清晰）
+      col+=mix(vec3(0.0), vec3(0.55,0.65,0.85), uMoonI)*pow(sd,60.0)*0.30;  // 月晕
+      // 横向薄云 / 晚霞火烧云
+      vec2 cp=vec2(d.x,d.z)/(d.y+0.28)*3.2;
+      float cl=fbm(cp+vec2(uTime*0.004,0.0));
+      float band=smoothstep(0.03,0.10,h)*smoothstep(0.42,0.14,h);
+      col=mix(col, mix(uCloudA,uCloudB,cl), smoothstep(0.42,0.85,cl)*band*uCloudAmt);
+      // 高空横向丝状云（参考 Demo 天顶处的细云丝）
+      vec2 sp=vec2(d.x/(d.y+0.55)*1.3, d.z/(d.y+0.55)*6.5);
+      float sl=fbm(sp*1.7+vec2(uTime*0.002,0.0));
+      float sband=smoothstep(0.16,0.42,h)*smoothstep(0.90,0.55,h);
+      col=mix(col, mix(uCloudA,uCloudB,sl)*0.9, smoothstep(0.52,0.88,sl)*sband*0.20);
+      // 日方位地平线光带（横贯海平线的橙红光带）
+      float sunAz=max(dot(normalize(vec3(d.x,0.0,d.z)), normalize(vec3(uSunDir.x,0.0,uSunDir.z))),0.0);
+      col+=uSunCol*pow(sunAz,3.0)*exp(-abs(d.y)*16.0)*uBand;
+      // 星空（深夜渐显，微闪烁）
+      vec3 cell=floor(d*230.0);
+      float star=hash21(cell.xy+cell.z*0.37);
+      float tw=0.55+0.45*sin(uTime*2.5+star*43.0);
+      col+=vec3(0.85,0.88,1.0)*smoothstep(0.9986,1.0,star)*tw*uStars*step(0.02,h);
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+const sky = new THREE.Mesh(new THREE.SphereGeometry(3000, 48, 24), skyMat);
+sky.frustumCulled = false;
+scene.add(sky);
+
+/* ============================================================
+   海洋：Gerstner 波浪顶点位移 + 白顶泡沫 + 太阳金色波光
+   ============================================================ */
+const OCEAN_SIZE = 1600, OCEAN_SEG = 512;
+const OCEAN_GRID = OCEAN_SIZE / OCEAN_SEG;
+const oceanGeo = new THREE.PlaneGeometry(OCEAN_SIZE, OCEAN_SIZE, OCEAN_SEG, OCEAN_SEG);
+oceanGeo.rotateX(-Math.PI / 2);
+
+const oceanMat = new THREE.ShaderMaterial({
+  fog: false,
+  uniforms: {
+    uTime: { value: 0 },
+    uOffset: { value: new THREE.Vector2() },
+    uSunDir: { value: SUN_DIR },
+    uCamPos: { value: new THREE.Vector3() },
+    uSunCol: { value: SUN_COL },
+    uDeep: { value: DEEP }, uShal: { value: SHALLOW }, uSSS: { value: SSS_COL },
+    uHor: { value: SKY_HORIZON }, uZen: { value: SKY_ZENITH },
+    uHazeA: { value: HAZE_A }, uHazeB: { value: HAZE_B },
+    uGlit: { value: 1.0 },
+    uReflMap: { value: reflRT.texture },
+    uReflMatrix: { value: new THREE.Matrix4() },
+    uBandO: { value: 1.0 },
+    uShipPos: { value: new THREE.Vector2() },
+    uShipRot: { value: 0 },
+  },
+  vertexShader: `
+    uniform float uTime; uniform vec2 uOffset; uniform mat4 uReflMatrix;
+    varying vec3 vWorld; varying vec3 vNrm; varying float vElev; varying vec4 vReflUv;
+    void gerstner(vec2 p, inout vec3 pos, inout vec3 T, inout vec3 B){
+      vec2 D; float k,w,A,Q; float f,S,C;
+      ${glslWaves}
+    }
+    void main(){
+      vec3 wp=vec3(position.x+uOffset.x, 0.0, position.z+uOffset.y);
+      vec3 pos=wp; vec3 T=vec3(1.,0.,0.); vec3 B=vec3(0.,0.,1.);
+      gerstner(wp.xz, pos, T, B);
+      vNrm=normalize(cross(B,T));
+      vElev=pos.y; vWorld=pos;
+      vReflUv=uReflMatrix*vec4(pos,1.0);
+      gl_Position=projectionMatrix*viewMatrix*vec4(pos,1.0);
+    }`,
+  fragmentShader: `
+    uniform float uTime; uniform vec3 uSunDir; uniform vec3 uCamPos; uniform vec3 uSunCol;
+    uniform vec3 uDeep,uShal,uSSS,uHor,uZen,uHazeA,uHazeB; uniform float uGlit,uBandO;
+    uniform sampler2D uReflMap; uniform vec2 uShipPos; uniform float uShipRot;
+    varying vec3 vWorld; varying vec3 vNrm; varying float vElev; varying vec4 vReflUv;
+    ${NOISE_GLSL}
+    void main(){
+      float dist=length(vWorld-uCamPos);
+      float detFade=exp(-dist*0.0038);
+      // 细节法线（三尺度噪声，随距离衰减）
+      vec2 p1=vWorld.xz*0.55+uTime*vec2(0.10,0.05);
+      vec2 p2=vWorld.xz*2.10+uTime*vec2(-0.16,0.09);
+      vec2 p3=vWorld.xz*5.30+uTime*vec2(0.22,-0.13);
+      float e=0.16;
+      vec2 g1=vec2(vnoise(p1+vec2(e,0.))-vnoise(p1), vnoise(p1+vec2(0.,e))-vnoise(p1))/e;
+      vec2 g2=vec2(vnoise(p2+vec2(e,0.))-vnoise(p2), vnoise(p2+vec2(0.,e))-vnoise(p2))/e;
+      vec2 g3=vec2(vnoise(p3+vec2(e,0.))-vnoise(p3), vnoise(p3+vec2(0.,e))-vnoise(p3))/e;
+      vec2 g=(g1*1.05+g2*0.70+g3*0.38)*detFade;
+      vec3 N=normalize(vNrm+vec3(g.x,0.,g.y)*1.0);
+      vec3 V=normalize(uCamPos-vWorld);
+      float hMix=clamp(vElev/${SUM_A.toFixed(3)}*0.5+0.5, 0.0, 1.0);
+      // 基色：深水 -> 浪脊青绿
+      float fn=fbm(vWorld.xz*0.22+vec2(uTime*0.02,0.0));
+      vec3 water=mix(uDeep,uShal,
+                     clamp(hMix*0.75+fn*0.35-0.15,0.0,1.0));
+      // 逆浪透光（次表面散射感）
+      float sss=pow(max(dot(V,-uSunDir),0.0),3.0)*clamp(vElev*1.6+0.7,0.0,1.0);
+      water+=uSSS*sss*1.0;
+      // 天空反射（随天气预设联动：晚霞时海面映出红橙天光）
+      vec3 R=reflect(-V,N);
+      vec3 skyRef=mix(uHor,uZen, clamp(R.y*1.7,0.0,1.0));
+      float fres=0.055+0.945*pow(clamp(1.0-max(dot(N,V),0.0),0.0,1.0),5.0);
+      // 真实平面反射：近处混入镜像 RT（船与天空的倒影），随波法线扰动
+      vec2 ruv=vReflUv.xy/max(vReflUv.w,1e-4);
+      float reflFade=1.0-smoothstep(24.0,150.0,dist);
+      ruv+=N.xz*0.09*reflFade;
+      vec3 refl=texture2D(uReflMap, clamp(ruv,vec2(0.002),vec2(0.998))).rgb;
+      vec3 env=mix(skyRef, refl, reflFade);
+      vec3 col=mix(water, env, fres*0.70);
+      // 太阳镜面：宽光晕 + 高频碎金
+      vec3 H=normalize(V+uSunDir);
+      float ndh=max(dot(N,H),0.0);
+      float sheen=pow(ndh,26.0)*0.34;
+      float glit=pow(ndh,760.0)*(0.55+0.90*vnoise(vWorld.xz*3.1+uTime*0.7));
+      float glit2=pow(ndh,160.0)*(0.45+0.55*vnoise(vWorld.xz*1.4+uTime*0.35));
+      float glit3=pow(ndh,64.0)*(0.35+0.65*vnoise(vWorld.xz*6.0+uTime*1.1));
+      float sunVis=smoothstep(-0.02,0.06,uSunDir.y+0.04);
+      col+=uSunCol*(sheen+(glit*3.2+glit2*0.5+glit3*0.65)*uGlit)*sunVis;
+      // 白顶泡沫
+      float foamN=fbm(vWorld.xz*0.60+vec2(uTime*0.10,uTime*0.05));
+      float crest=smoothstep(0.55,0.92,hMix)*smoothstep(0.38,0.66,foamN);
+      vec3 foamCol=vec3(0.97,0.93,0.87)*(0.72+0.30*max(dot(N,uSunDir),0.0));
+      col=mix(col,foamCol,crest*0.9);
+      // 陡坡碎浪条（参考 Demo：浪坡上风向拉长的白色浪花）
+      float steep=clamp(1.0-N.y,0.0,1.0);
+      float capN=fbm(vWorld.xz*0.75+vec2(uTime*0.16,uTime*0.05));
+      float streak=smoothstep(0.35,0.95,vnoise(vec2(vWorld.x*0.30-uTime*0.15,vWorld.z*1.7)));
+      float cap=smoothstep(0.16,0.34,steep)*smoothstep(0.42,0.78,capN*0.72+steep*0.55)*(0.45+0.75*streak);
+      col=mix(col,foamCol,clamp(cap,0.0,1.0)*0.8);
+      // 船体水线泡沫：直接绘制在浪面上（跟随船位/朝向，永不穿模）
+      vec2 sd2=vWorld.xz-uShipPos;
+      float lx=sd2.x*cos(uShipRot)-sd2.y*sin(uShipRot);
+      float lz=sd2.x*sin(uShipRot)+sd2.y*cos(uShipRot);
+      float eHull=length(vec2(lx/8.8, lz/2.4));
+      float rim=smoothstep(0.90,1.02,eHull)*smoothstep(1.38,1.06,eHull);
+      float hfn=fbm(vWorld.xz*1.3+vec2(uTime*0.35,0.0));
+      float bowF=0.55+0.75*smoothstep(-3.0,7.0,lx);
+      float hullFoam=rim*(0.30+0.90*hfn)*bowF;
+      col=mix(col,foamCol,clamp(hullFoam,0.0,1.0)*0.85);
+      // 远处暖霾，越朝太阳越亮（与天空地平线融合）+ 日方位地平线光带
+      float align=pow(max(dot(normalize(vWorld-uCamPos),uSunDir),0.0),3.0);
+      float dirY=(vWorld.y-uCamPos.y)/max(dist,1.0);
+      col+=uSunCol*align*exp(-abs(dirY)*16.0)*0.30*uBandO;
+      vec3 haze=mix(uHazeA,uHazeB, align);
+      float fog=1.0-exp(-pow(dist*0.00135,1.30));
+      col=mix(col,haze,fog);
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+ocean.frustumCulled = false;
+scene.add(ocean);
+
+/* ============================================================
+   帆船（程序化建模：船体放样 / 甲板 / 桅桁 / 索具）
+   ============================================================ */
+const ship = new THREE.Group();
+scene.add(ship);
+
+function keyInterp(ts, vs, t) {
+  if (t <= ts[0]) return vs[0];
+  for (let i = 0; i < ts.length - 1; i++) if (t <= ts[i + 1]) {
+    const u = (t - ts[i]) / (ts[i + 1] - ts[i]), s = u * u * (3 - 2 * u);
+    return vs[i] + (vs[i + 1] - vs[i]) * s;
+  }
+  return vs[vs.length - 1];
+}
+const HT = [0, .05, .14, .30, .45, .60, .75, .90, 1];
+const HW_ = [0.10, 0.62, 1.08, 1.42, 1.50, 1.46, 1.28, 1.06, 0.98];
+const HK = [-0.20, -0.60, -0.84, -0.94, -0.96, -0.92, -0.80, -0.52, -0.30];
+const HS = [2.05, 1.58, 1.26, 1.10, 1.06, 1.10, 1.30, 1.62, 1.80];
+const SHIP_L = 15.5;
+const halfW = t => keyInterp(HT, HW_, t);
+const keelY = t => keyInterp(HT, HK, t);
+const sheerY = t => keyInterp(HT, HS, t);
+const stationX = t => (0.5 - t) * SHIP_L;
+
+// —— 船体放样 ——
+{
+  const N = 44, M = 11, RING = 2 * M;
+  const pos = [], col = [], idx = [];
+  const hullLow = new THREE.Color(0x241a14), hullMid = new THREE.Color(0x54291f),
+        stripe = new THREE.Color(0xc08a3e), hullUp = new THREE.Color(0x6b3a28);
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, x = stationX(t), hw = halfW(t), ky = keelY(t), sy = sheerY(t);
+    for (let r = 0; r < RING; r++) {
+      const side = r < M ? -1 : 1;                    // -1 右舷  +1 左舷
+      const j = r < M ? r : RING - 1 - r;             // 0 舷缘 → M-1 龙骨
+      const s = j / (M - 1), ang = s * Math.PI / 2;
+      const zw = hw * Math.pow(Math.cos(ang), 0.78);
+      const y = sy + (ky - sy) * Math.pow(Math.sin(ang), 1.25);
+      pos.push(x, y, side * zw);
+      let c;
+      if (y < -0.18) c = hullLow; else if (y < 0.30) c = hullMid;
+      else if (y < 0.46) c = stripe; else c = hullUp;
+      const v = 0.92 + 0.16 * ((i * 7 + r * 13) % 10) / 10;
+      col.push(c.r * v, c.g * v, c.b * v);
+    }
+  }
+  for (let i = 0; i < N; i++) for (let r = 0; r < RING - 1; r++) {
+    const a = i * RING + r, b = a + 1, c = a + RING, d = c + 1;
+    idx.push(a, b, c, b, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  ship.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.06, side: THREE.DoubleSide })));
+}
+
+// —— 甲板 ——
+{
+  const N = 30, pos = [], col = [], idx = [];
+  const deck = new THREE.Color(0x7d5c3e);
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, x = stationX(t), hw = halfW(t) * 0.96, dy = sheerY(t) - 0.42;
+    pos.push(x, dy + 0.02, -hw, x, dy + 0.02, hw);
+    const v = i % 2 ? 1.0 : 0.9;
+    col.push(deck.r * v, deck.g * v, deck.b * v, deck.r * v * 0.96, deck.g * v * 0.96, deck.b * v * 0.96);
+  }
+  for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  ship.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide })));
+}
+
+// —— 艉封板 + 舷窗 / 炮窗（暖光） ——
+{
+  const xT = stationX(1) - 0.02, RING = 22;
+  const pos = [], idx = [];
+  const cx = xT - 0.22, cy = (sheerY(1) + keelY(1)) / 2 + 0.15;
+  pos.push(cx, cy, 0);
+  const t = 1, hw = halfW(1), ky = keelY(1), sy = sheerY(1);
+  for (let r = 0; r < RING; r++) {
+    // 环：右舷舷缘→龙骨（j=0..10），左舷龙骨→舷缘（j=10..0），s 保持在 [0,1]，
+    // 否则 cos(ang) 为负，Math.pow(负数, 1.25) 会产生 NaN
+    const side = r < 11 ? -1 : 1, j = r < 11 ? r : 21 - r, s = j / 10, ang = s * Math.PI / 2;
+    const zw = hw * Math.pow(Math.cos(ang), 0.78);
+    pos.push(xT, sy + (ky - sy) * Math.pow(Math.sin(ang), 1.25), side * zw);
+  }
+  for (let r = 1; r < RING - 1; r++) idx.push(0, r, r + 1);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  ship.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x4a271c, roughness: 0.7, side: THREE.DoubleSide })));
+
+  const winMat = new THREE.MeshStandardMaterial({ color: 0x120c08, emissive: 0xff9c4a, emissiveIntensity: 3.2, roughness: 0.4 });
+  for (const zc of [-0.52, 0, 0.52]) {
+    const w = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.30), winMat);
+    w.position.set(cx - 0.01, 1.18, zc); w.rotation.y = -Math.PI / 2; ship.add(w);
+  }
+  const portMat = new THREE.MeshStandardMaterial({ color: 0x170e08, emissive: 0xff9c4a, emissiveIntensity: 2.1, roughness: 0.5 });
+  for (const xp of [-3.4, -1.7, 0, 1.7, 3.4]) {
+    const t2 = 0.5 - xp / SHIP_L;
+    for (const side of [-1, 1]) {
+      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.30, 0.22), portMat);
+      p.position.set(xp, 0.02, side * (halfW(t2) - 0.03));
+      p.rotation.y = side * Math.PI / 2; ship.add(p);
+    }
+  }
+  // 艉楼灯笼（发光球）
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0x201008, emissive: 0xffb45c, emissiveIntensity: 3.2 });
+  for (const zc of [-0.75, 0.75]) {
+    const l = new THREE.Mesh(new THREE.SphereGeometry(0.10, 10, 8), lampMat);
+    l.position.set(-7.45, 1.95, zc); ship.add(l);
+  }
+}
+
+// —— 舷缘金色护栏（沿船舷曲线的管几何） ——
+{
+  const railMat = new THREE.MeshStandardMaterial({ color: 0xb98a3c, roughness: 0.38, metalness: 0.65 });
+  for (const side of [-1, 1]) {
+    const pts = [];
+    for (let i = 0; i <= 30; i++) {
+      const t = i / 30;
+      pts.push(new THREE.Vector3(stationX(t), sheerY(t) + 0.02, side * halfW(t)));
+    }
+    ship.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 60, 0.075, 6), railMat));
+  }
+  // 艏柱
+  const stem = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(7.75, -0.6, 0), new THREE.Vector3(8.2, 0.5, 0),
+    new THREE.Vector3(8.05, 1.6, 0), new THREE.Vector3(7.7, 2.3, 0)]);
+  ship.add(new THREE.Mesh(new THREE.TubeGeometry(stem, 20, 0.09, 6),
+    new THREE.MeshStandardMaterial({ color: 0x6b3a28, roughness: 0.6 })));
+}
+
+// —— 木料 / 金属通用材质 ——
+const woodMat = new THREE.MeshStandardMaterial({ color: 0x5a3624, roughness: 0.65 });
+const mastMat = new THREE.MeshStandardMaterial({ color: 0x6a4530, roughness: 0.55 });
+
+/* ============================================================
+   帆：顶点着色器鼓风 + 逆光透射 + 褶皱明暗
+   ============================================================ */
+const sailUniforms = {
+  uTime: { value: 0 }, uGust: { value: 1 },
+  uSunDir: { value: SUN_DIR }, uSunCol: { value: SUN_COL },
+  uCamPos: { value: new THREE.Vector3() },
+  uAmb: { value: new THREE.Color(0.51, 0.41, 0.35) },
+  uFogCol: { value: new THREE.Color(0.85, 0.56, 0.36) },
+};
+const sailMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide, uniforms: sailUniforms,
+  vertexShader: `
+    uniform float uTime, uGust;
+    attribute float aBelly;
+    varying vec3 vNrm; varying vec3 vWorld; varying vec2 vUv;
+    vec3 sailPos(vec2 uv, vec3 base){
+      float u=uv.x, v=uv.y;
+      float belly=aBelly*sin(u*3.14159)*pow(max(sin(v*2.79+0.35),0.0),0.9)*(0.85+0.30*uGust);
+      float flut=sin(u*22.0-uTime*9.0+v*6.0)*0.022*(0.25+v)*(0.4+0.6*uGust);
+      float fold=sin(u*6.283+v*2.0)*0.016*sin(v*3.14159);
+      vec3 p=base;
+      p.z+=belly+flut+fold;
+      p.x*=mix(1.0,0.86,v);              // 底边略收
+      return p;
+    }
+    void main(){
+      vUv=uv;
+      vec3 p=sailPos(uv, position);
+      vec3 du=sailPos(uv+vec2(0.01,0.0), position)-p;
+      vec3 dv=sailPos(uv+vec2(0.0,0.01), position)-p;
+      vNrm=normalize(cross(du,dv));
+      vec4 wp=modelMatrix*vec4(p,1.0);
+      vWorld=wp.xyz;
+      gl_Position=projectionMatrix*viewMatrix*wp;
+    }`,
+  fragmentShader: `
+    uniform vec3 uSunDir, uSunCol, uCamPos, uAmb, uFogCol;
+    varying vec3 vNrm; varying vec3 vWorld; varying vec2 vUv;
+    void main(){
+      vec3 N=normalize(vNrm); if(!gl_FrontFacing) N=-N;
+      vec3 V=normalize(uCamPos-vWorld);
+      float ndl=dot(N,uSunDir);
+      float wrap=clamp((ndl+0.48)/1.48,0.0,1.0);
+      vec3 base=vec3(0.95,0.87,0.71);
+      float seam=smoothstep(0.93,1.0,sin(vUv.x*3.14159*4.0)*0.5+0.5);
+      base*=1.0-0.10*seam;
+      float hseam=smoothstep(0.92,1.0,sin(vUv.y*3.14159*3.0)*0.5+0.5);
+      base*=1.0-0.07*hseam;
+      vec3 amb=uAmb;
+      float tl=pow(clamp(-ndl,0.0,1.0),1.5);          // 逆光透射 —— 金色发光
+      vec3 col=base*(amb+uSunCol*wrap*1.05)+base*tl*uSunCol*vec3(1.0,0.85,0.6)*2.6;
+      col*=mix(0.86,1.0,smoothstep(0.0,0.16,vUv.y));   // 顶边受桁影略暗
+      col+=uSunCol*pow(clamp(1.0-abs(dot(N,V)),0.0,1.0),3.0)*0.22;    // 边缘暖光
+      float dist=length(vWorld-uCamPos);
+      float fog=1.0-exp(-pow(dist*0.00135,1.30)*0.55);
+      col=mix(col,uFogCol,fog);
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+
+function makeSquareSail(w, h, belly) {
+  const g = new THREE.PlaneGeometry(w, h, 22, 14);
+  g.rotateY(Math.PI / 2);   // 宽度沿 Z、法线朝 +X（船艏方向鼓出）
+  const b = new Float32Array(g.attributes.position.count).fill(belly);
+  g.setAttribute('aBelly', new THREE.BufferAttribute(b, 1));
+  const m = new THREE.Mesh(g, sailMat);
+  m.frustumCulled = false;
+  return m;
+}
+
+const MASTS = [
+  { x: 4.9, h: 10.8, yards: [[5.0, 4.8, 2.7], [7.9, 3.5, 2.3]] },
+  { x: 0.0, h: 13.6, yards: [[5.4, 5.9, 3.1], [8.6, 4.5, 2.6], [11.2, 3.1, 2.0]] },
+  { x: -4.7, h: 10.6, yards: [[4.6, 4.3, 2.5], [7.3, 3.2, 2.2]] },
+];
+const rigPts = [];
+for (const m of MASTS) {
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.17, m.h, 8), mastMat);
+  mast.position.set(m.x, m.h / 2 + 0.55, 0); ship.add(mast);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.10, 8), woodMat);
+  cap.position.set(m.x, m.h + 0.55, 0); ship.add(cap);
+  for (const [y, w, sh] of m.yards) {
+    const yard = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, w, 6), mastMat);
+    yard.rotation.x = Math.PI / 2;
+    yard.position.set(m.x, y + 0.55, 0); ship.add(yard);
+    const sail = makeSquareSail(w * 0.94, sh, 0.42 + w * 0.03);
+    sail.position.set(m.x + 0.16, y + 0.55 - sh / 2 - 0.18, 0);
+    ship.add(sail);
+    rigPts.push(m.x, y + 0.55, -w / 2, m.x, m.h + 0.4, 0, m.x, y + 0.55, w / 2, m.x, m.h + 0.4, 0); // 桁吊索
+    const fy = y - sh - 0.1;
+    rigPts.push(m.x + 0.16, fy, -w * 0.36, m.x - 1.3, sheerY(0.5 - m.x / SHIP_L) - 0.3, -1.1,
+                m.x + 0.16, fy, w * 0.36, m.x - 1.3, sheerY(0.5 - m.x / SHIP_L) - 0.3, 1.1);       // 帆脚索
+  }
+  // 左右支索
+  const t = 0.5 - m.x / SHIP_L, railY = sheerY(t) + 0.05, railZ = halfW(t) - 0.12;
+  for (const side of [-1, 1]) for (let s = 0; s < 3; s++) {
+    rigPts.push(m.x, m.h * 0.8 + 0.5, 0, m.x - 0.9 + s * 0.9, railY, side * railZ);
+  }
+  // 主桅瞭望台（参考 Demo 桅顶细节）
+  const nest = new THREE.Mesh(new THREE.CylinderGeometry(0.30, 0.22, 0.26, 10), woodMat);
+  nest.position.set(MASTS[1].x, MASTS[1].h + 0.32, 0); ship.add(nest);
+}
+// 前后支索 + 艏斜桅
+const bowsprit = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.10, 5.6, 7), mastMat);
+bowsprit.rotation.z = -Math.PI / 2 + 0.21;
+bowsprit.position.set(9.9, 1.9, 0); ship.add(bowsprit);
+rigPts.push(12.4, 2.38, 0, MASTS[0].x, MASTS[0].h + 0.5, 0,
+            MASTS[0].x, MASTS[0].h + 0.5, 0, MASTS[1].x, MASTS[1].h + 0.5, 0,
+            MASTS[2].x, MASTS[2].h + 0.5, 0, MASTS[1].x, MASTS[1].h + 0.5, 0,
+            12.0, 2.35, 0, 8.05, 0.4, 0);
+{
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(rigPts, 3));
+  ship.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x241b14, transparent: true, opacity: 0.9 })));
+}
+
+// —— 前帆（艏斜桅三角帆） ——
+{
+  const A = new THREE.Vector3(12.35, 2.35, 0), B = new THREE.Vector3(4.95, 6.7, 0), C = new THREE.Vector3(5.7, 1.3, 0);
+  const n = 8, pos = [], uv = [], belly = [], idx = [];
+  for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+    const u = i / n, v = j / n;
+    const p = A.clone().lerp(B, u).lerp(C, v);
+    pos.push(p.x, p.y, p.z); uv.push(u, v); belly.push(0.5);
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+    const a = i * (n + 1) + j, b = a + 1, c = a + n + 1, d = c + 1;
+    if (i + j < n) idx.push(a, b, c, b, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('aBelly', new THREE.Float32BufferAttribute(belly, 1));
+  g.setIndex(idx);
+  const jib = new THREE.Mesh(g, sailMat); jib.frustumCulled = false; ship.add(jib);
+}
+
+// —— 主桅顶红旗 ——
+const flagMat = new THREE.ShaderMaterial({
+  side: THREE.DoubleSide,
+  uniforms: { uTime: { value: 0 }, uSunDir: { value: SUN_DIR }, uSunCol: { value: SUN_COL } },
+  vertexShader: `
+    uniform float uTime; varying vec2 vUv; varying vec3 vNrm;
+    void main(){
+      vUv=uv; vec3 p=position;
+      float u=uv.x;
+      p.z+=(sin(u*7.0-uTime*9.0)*0.15+sin(u*13.0-uTime*13.0)*0.05)*u;
+      p.y-=0.10*u*u;
+      vec3 du=vec3(0.02,0.0,(sin((u+0.02)*7.0-uTime*9.0)*0.15)*u-p.z);
+      vNrm=normalize(cross(du,vec3(0.0,0.02,0.0)));
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
+    }`,
+  fragmentShader: `
+    uniform vec3 uSunDir,uSunCol; varying vec2 vUv; varying vec3 vNrm;
+    void main(){
+      vec3 N=normalize(vNrm); if(!gl_FrontFacing) N=-N;
+      float d=max(dot(N,uSunDir),0.0);
+      float back=pow(clamp(-dot(N,uSunDir),0.0,1.0),2.0);
+      vec3 col=vec3(0.80,0.20,0.14)*(0.48+0.75*d)+vec3(0.85,0.45,0.25)*pow(d,3.0)*0.5
+               +vec3(1.0,0.55,0.30)*back*0.45;
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+{
+  const g = new THREE.PlaneGeometry(1.7, 0.5, 10, 3);
+  g.translate(0.85, 0, 0);
+  const flag = new THREE.Mesh(g, flagMat);
+  flag.position.set(0, MASTS[1].h + 0.62, 0); flag.frustumCulled = false; ship.add(flag);
+}
+
+/* ============================================================
+   尾迹（船艉泡沫带）+ 船体周围浪花
+   ============================================================ */
+const wakeUniforms = { uTime: { value: 0 }, uTint: { value: new THREE.Color(0.96, 0.92, 0.87) } };
+const wakeMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false, uniforms: wakeUniforms,
+  vertexShader: `
+    attribute float aFade; attribute float aSide;
+    varying float vFade; varying float vSide; varying vec2 vXZ;
+    void main(){ vFade=aFade; vSide=aSide; vXZ=position.xz;
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader: `
+    uniform float uTime; uniform vec3 uTint; varying float vFade; varying float vSide; varying vec2 vXZ;
+    ${NOISE_GLSL}
+    void main(){
+      float fn=fbm(vXZ*0.85+vec2(uTime*0.22,uTime*0.05));
+      float edge=abs(vSide);
+      float rim=smoothstep(0.30,0.95,edge);
+      float core=(1.0-smoothstep(0.0,0.6,edge))*smoothstep(0.30,0.75,fn);
+      float foam=(rim*1.0+core*0.75)*smoothstep(0.28,0.70,fn*0.85+rim*0.3);
+      vec3 col=uTint;
+      gl_FragColor=vec4(col, foam*vFade*0.95);
+    }`
+});
+const WAKE_MAX = 260;
+let wakeMesh;
+const wakePos = new Float32Array(WAKE_MAX * 2 * 3);
+const wakeFade = new Float32Array(WAKE_MAX * 2);
+const wakeSide = new Float32Array(WAKE_MAX * 2);
+{
+  const idx = [];
+  for (let i = 0; i < WAKE_MAX - 1; i++) {
+    const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(wakePos, 3));
+  g.setAttribute('aFade', new THREE.BufferAttribute(wakeFade, 1));
+  g.setAttribute('aSide', new THREE.BufferAttribute(wakeSide, 1));
+  g.setIndex(idx);
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e6);
+  wakeMesh = new THREE.Mesh(g, wakeMat);
+  wakeMesh.frustumCulled = false;
+  scene.add(wakeMesh);
+}
+const wakePts = [];   // {x,z,t}
+let wakeAcc = 0;
+
+/* 船体水线泡沫已并入海洋着色器（uShipPos/uShipRot 在浪面直接绘制，杜绝平面贴片穿模） */
+
+/* ============================================================
+   海鸟（剪影）
+   ============================================================ */
+const birds = [];
+{
+  const bMat = new THREE.MeshBasicMaterial({ color: 0x2b2118, side: THREE.DoubleSide });
+  for (let i = 0; i < 6; i++) {
+    const g = new THREE.Group();
+    const wingGeo = new THREE.BufferGeometry();
+    wingGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, -0.72, 0.10, 0.30, -0.72, 0.10, -0.30], 3));
+    wingGeo.computeVertexNormals();
+    const l = new THREE.Mesh(wingGeo, bMat), r = new THREE.Mesh(wingGeo, bMat);
+    r.scale.z = -1; g.add(l, r);
+    g.scale.setScalar(0.9 + Math.random() * 0.5);
+    g.userData = { phase: Math.random() * 20, r: 9 + Math.random() * 10, sp: 0.25 + Math.random() * 0.12, wl: l, wr: r };
+    birds.push(g); scene.add(g);
+  }
+}
+
+/* ============================================================
+   运镜（四镜头循环）与自由视角
+   ============================================================ */
+// 自检：扫描所有几何 position 属性，发现 NaN 立即上报（防止再次引入 NaN 顶点）
+window.__nanScan = [];
+scene.traverse(o => {
+  const g = o.geometry;
+  if (!g || !g.attributes || !g.attributes.position) return;
+  const p = g.attributes.position.array;
+  for (let i = 0; i < p.length; i++) if (!Number.isFinite(p[i])) {
+    window.__nanScan.push(o.type + '/' + g.type + ' @v' + i);
+    break;
+  }
+});
+if (window.__nanScan.length) window.__errs.push('NaN positions: ' + window.__nanScan.join(' | '));
+
+const SHOTS = [
+  { d: 14, fov: [44, 41], p: [[27, 9.5, 26], [23, 7, 19.5], [17, 5.5, 13.5]], l: [[-2.5, 4.5, -0.5], [-3, 4.2, -1]], name: '镜头一 · 左舷逆光' },
+  { d: 12, fov: [52, 49], p: [[6, 2.6, 31], [4.5, 2.3, 23.5], [3.4, 2.1, 17.5]], l: [[-1, 5.5, 0], [-0.5, 5.5, 1.5]], name: '镜头二 · 贴水金波' },
+  { d: 14, fov: [40, 38], p: [[19, 6.5, 17], [2, 7.8, 25.5], [-16, 6, 18]], l: [[-3.5, 5.5, 0], [-4, 6, 0]], name: '镜头三 · 艉迹环绕' },
+  { d: 12, fov: [47, 44], p: [[33, 4.5, -9.5], [24, 5, -6.5], [18, 5.5, -4.5]], l: [[1, 6, 0], [0, 7, 0]], name: '镜头四 · 艏前推进' },
+];
+const SHOT_TOTAL = SHOTS.reduce((s, x) => s + x.d, 0);
+const ease = s => s * s * (3 - 2 * s);
+const lerpV = (a, b, t, out) => out.set(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08;
+controls.minDistance = 8; controls.maxDistance = 140;
+controls.maxPolarAngle = 1.53; controls.enabled = false;
+
+let autoCam = true, paused = false, quality = 'high', bloomBase = 0.55;
+const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
+let shotIdxPrev = -1;
+const camTarget = new THREE.Vector3(0, 5, 0);   // 当前注视点（反射相机镜像用）
+
+function updateCamera(t, dt) {
+  const shotCap = document.getElementById('shotCap');
+  if (!autoCam) { controls.target.copy(ship.position).add(_v1.set(0, 5, 0)); controls.update(); camTarget.copy(controls.target); return; }
+  let s = t % SHOT_TOTAL, i = 0;
+  while (s > SHOTS[i].d) { s -= SHOTS[i].d; i++; }
+  const sh = SHOTS[i], u = ease(s / sh.d);
+  // 二次贝塞尔 + 手持微晃（前两步输入是数组，第三步输入是 Vector3 —— 不能用按下标取值的 lerpV）
+  lerpV(sh.p[0], sh.p[1], u, _v1); lerpV(sh.p[1], sh.p[2], u, _v2); _v3.copy(_v1).lerp(_v2, u);
+  lerpV(sh.l[0], sh.l[1], u, _v1);
+  camera.position.copy(ship.position).add(_v3);
+  camera.position.x += Math.sin(t * 0.9) * 0.14; camera.position.y += Math.sin(t * 1.3 + 2) * 0.10; camera.position.z += Math.cos(t * 0.7) * 0.14;
+  _v1.add(ship.position); _v1.x += Math.sin(t * 1.1 + 1) * 0.10; _v1.y += Math.sin(t * 0.8) * 0.06;
+  const roll = Math.sin(t * 0.35) * 0.012;
+  camera.up.set(Math.sin(roll), Math.cos(roll), 0);
+  camera.lookAt(_v1);
+  camTarget.copy(_v1);
+  const f = sh.fov[0] + (sh.fov[1] - sh.fov[0]) * u;
+  if (Math.abs(camera.fov - f) > 0.01) { camera.fov = f; camera.updateProjectionMatrix(); }
+  if (i !== shotIdxPrev) {
+    shotIdxPrev = i;
+    shotCap.querySelector('.name').textContent = sh.name;
+    shotCap.querySelector('.idx').textContent = `镜头 ${i + 1} / ${SHOTS.length}`;
+  }
+}
+
+/* ============================================================
+   天气系统：日出 / 晚霞 / 深夜 —— 3 秒渐变切换（期间锁定）
+   深夜模式：SUN_DIR 复用为月亮方向，uMoonI/uStars 控制月面与星空渐显
+   ============================================================ */
+const PRESETS = {
+  sunset: {
+    name: '日出',
+    sunDir: [-0.62, 0.11, -0.75], sunCol: [1.0, 0.66, 0.36],
+    sunLight: 0xffb173, sunLightI: 2.4,
+    hemiSky: 0x4a5058, hemiGnd: 0x0d2830, hemiI: 0.8, amb: 0x584a3a, ambI: 0.4,
+    fog: 0xd9905c, exposure: 1.16, bloom: 0.30,
+    hazeA: [0.78, 0.48, 0.30], hazeB: [1.08, 0.73, 0.42],
+    skyHor: [1.00, 0.60, 0.27], skyMid: [0.83, 0.54, 0.38], skyZen: [0.26, 0.265, 0.27],
+    cloudA: [0.98, 0.63, 0.42], cloudB: [1.05, 0.83, 0.62], cloudAmt: 0.30, glow: 0.16,
+    band: 1.1, bandO: 1.0, glit: 1.25, moonI: 0, stars: 0,
+    deep: [0.024, 0.120, 0.140], shal: [0.085, 0.330, 0.290], sss: [0.10, 0.42, 0.34],
+    foam: [0.96, 0.92, 0.87],
+    ambSail: [0.51, 0.41, 0.35], fogSail: [0.85, 0.56, 0.36],
+  },
+  glow: {
+    name: '晚霞',
+    sunDir: [-0.62, -0.012, -0.75], sunCol: [1.0, 0.38, 0.15],
+    sunLight: 0xff5f28, sunLightI: 1.6,
+    hemiSky: 0x46333c, hemiGnd: 0x0b1016, hemiI: 0.55, amb: 0x3c2420, ambI: 0.34,
+    fog: 0x7e3626, exposure: 0.95, bloom: 0.38,
+    hazeA: [0.42, 0.18, 0.14], hazeB: [1.00, 0.36, 0.17],
+    skyHor: [1.00, 0.40, 0.17], skyMid: [0.52, 0.26, 0.26], skyZen: [0.14, 0.15, 0.21],
+    cloudA: [0.26, 0.11, 0.14], cloudB: [1.25, 0.40, 0.19], cloudAmt: 0.62, glow: 0.34,
+    band: 1.5, bandO: 1.4, glit: 1.7, moonI: 0, stars: 0,
+    deep: [0.010, 0.040, 0.055], shal: [0.055, 0.14, 0.14], sss: [0.30, 0.08, 0.045],
+    foam: [0.98, 0.72, 0.55],
+    ambSail: [0.30, 0.17, 0.14], fogSail: [0.66, 0.26, 0.16],
+  },
+  night: {
+    name: '深夜',
+    sunDir: [-0.35, 0.38, -0.60], sunCol: [0.72, 0.82, 1.0],
+    sunLight: 0xaac6ff, sunLightI: 1.1,
+    hemiSky: 0x232c40, hemiGnd: 0x05080d, hemiI: 0.4, amb: 0x141c2c, ambI: 0.3,
+    fog: 0x0a1018, exposure: 0.78, bloom: 0.45,
+    hazeA: [0.020, 0.035, 0.065], hazeB: [0.12, 0.16, 0.26],
+    skyHor: [0.05, 0.08, 0.14], skyMid: [0.028, 0.045, 0.095], skyZen: [0.010, 0.014, 0.032],
+    cloudA: [0.05, 0.07, 0.12], cloudB: [0.36, 0.43, 0.56], cloudAmt: 0.35, glow: 0.06,
+    band: 0.0, bandO: 0.0, glit: 1.35, moonI: 1, stars: 1,
+    deep: [0.004, 0.012, 0.022], shal: [0.020, 0.050, 0.090], sss: [0.05, 0.09, 0.15],
+    foam: [0.78, 0.83, 0.90],
+    ambSail: [0.10, 0.13, 0.19], fogSail: [0.10, 0.15, 0.25],
+  },
+};
+const MODE_ORDER = ['sunset', 'glow', 'night'];
+const MODE_LABEL = { sunset: '🌅 天气 · 日出', glow: '🌆 天气 · 晚霞', night: '🌙 天气 · 深夜' };
+const QUOTES = {
+  sunset: '海平线睁开眼睛的那一刻，整片海洋都是流动的金子。',
+  glow: '晚霞是天空未寄出的信，云烧到哪里，温柔就到哪里。',
+  night: '银色月光是谁的梦，破碎了一整个海洋。',
+};
+
+let weather = 'glow', transitioning = false, weatherT = 0, wFromState = null, wToState = null, wLastAt = 0;
+
+const W_COLORS = ['sunCol', 'sunLight', 'hemiSky', 'hemiGnd', 'amb', 'fog', 'hazeA', 'hazeB',
+  'skyHor', 'skyMid', 'skyZen', 'cloudA', 'cloudB', 'deep', 'shal', 'sss', 'foam', 'ambSail', 'fogSail'];
+const W_FLOATS = ['sunLightI', 'hemiI', 'ambI', 'exposure', 'bloom', 'cloudAmt', 'glow', 'band', 'bandO', 'glit', 'moonI', 'stars'];
+const COLOR_TARGETS = {
+  sunCol: SUN_COL, sunLight: sunLight.color, hemiSky: hemi.color, hemiGnd: hemi.groundColor,
+  amb: ambLight.color, fog: scene.fog.color, hazeA: HAZE_A, hazeB: HAZE_B,
+  skyHor: SKY_HORIZON, skyMid: SKY_MID, skyZen: SKY_ZENITH, cloudA: CLOUD_A, cloudB: CLOUD_B,
+  deep: DEEP, shal: SHALLOW, sss: SSS_COL, foam: wakeMat.uniforms.uTint.value,
+  ambSail: sailUniforms.uAmb.value, fogSail: sailUniforms.uFogCol.value,
+};
+const FLOAT_TARGETS = {
+  sunLightI: () => sunLight.intensity, hemiI: () => hemi.intensity, ambI: () => ambLight.intensity,
+  exposure: () => renderer.toneMappingExposure, bloom: () => bloomBase,
+  cloudAmt: () => skyMat.uniforms.uCloudAmt.value, glow: () => skyMat.uniforms.uGlow.value,
+  band: () => skyMat.uniforms.uBand.value, bandO: () => oceanMat.uniforms.uBandO.value,
+  glit: () => oceanMat.uniforms.uGlit.value,
+  moonI: () => skyMat.uniforms.uMoonI.value, stars: () => skyMat.uniforms.uStars.value,
+};
+const _hexTmp = new THREE.Color();
+function asRGB(v) {
+  if (Array.isArray(v)) return v.slice();
+  _hexTmp.set(v); return [_hexTmp.r, _hexTmp.g, _hexTmp.b];
+}
+function resolveState(p) {
+  const s = { sunDir: p.sunDir.slice() };
+  for (const k of W_COLORS) s[k] = asRGB(p[k]);
+  for (const k of W_FLOATS) s[k] = p[k];
+  return s;
+}
+function captureState() {
+  const s = { sunDir: [SUN_DIR.x, SUN_DIR.y, SUN_DIR.z] };
+  for (const k of W_COLORS) { const c = COLOR_TARGETS[k]; s[k] = [c.r, c.g, c.b]; }
+  for (const k of W_FLOATS) s[k] = FLOAT_TARGETS[k]();
+  return s;
+}
+function applyState(s) {
+  SUN_DIR.set(s.sunDir[0], s.sunDir[1], s.sunDir[2]).normalize();
+  for (const k of W_COLORS) COLOR_TARGETS[k].setRGB(s[k][0], s[k][1], s[k][2]);
+  sunLight.intensity = s.sunLightI;
+  sunLight.position.copy(SUN_DIR).multiplyScalar(300);
+  hemi.intensity = s.hemiI; ambLight.intensity = s.ambI;
+  renderer.toneMappingExposure = s.exposure;
+  bloomBase = s.bloom; bloom.strength = bloomBase * (quality === 'high' ? 1 : 0.64);
+  skyMat.uniforms.uCloudAmt.value = s.cloudAmt;
+  skyMat.uniforms.uGlow.value = s.glow;
+  skyMat.uniforms.uBand.value = s.band;
+  skyMat.uniforms.uMoonI.value = s.moonI;
+  skyMat.uniforms.uStars.value = s.stars;
+  oceanMat.uniforms.uGlit.value = s.glit;
+  oceanMat.uniforms.uBandO.value = s.bandO;
+}
+function lerpState(a, b, t) {
+  const out = {};
+  for (const k in a) {
+    const va = a[k], vb = b[k];
+    out[k] = Array.isArray(va)
+      ? [va[0] + (vb[0] - va[0]) * t, va[1] + (vb[1] - va[1]) * t, va[2] + (vb[2] - va[2]) * t]
+      : va + (vb - va) * t;
+  }
+  return out;
+}
+function startTransition(key) {
+  if (key === weather || transitioning) return;   // 渐变期间锁定，不支持逆向再切
+  wFromState = captureState();
+  wToState = resolveState(PRESETS[key]);
+  weather = key;
+  transitioning = true; weatherT = 0; wLastAt = performance.now();
+}
+
+/* ============================================================
+   UI
+   ============================================================ */
+const btnPause = document.getElementById('btnPause'), btnCam = document.getElementById('btnCam'),
+      btnQ = document.getElementById('btnQ'), btnW = document.getElementById('btnW'),
+      quoteEl = document.getElementById('quote'), hint = document.getElementById('hint');
+function togglePause() { paused = !paused; btnPause.textContent = paused ? '▶ 继续' : '⏸ 暂停'; btnPause.classList.toggle('on', paused); }
+function toggleCam() {
+  autoCam = !autoCam; controls.enabled = !autoCam;
+  btnCam.textContent = autoCam ? '🎥 自动运镜' : '🎥 自由视角';
+  hint.classList.toggle('show', !autoCam);
+  if (!autoCam) { camera.fov = 46; camera.updateProjectionMatrix(); camera.up.set(0, 1, 0); controls.target.copy(ship.position).add(new THREE.Vector3(0, 5, 0)); }
+}
+function setQuality(q) {
+  quality = q;
+  const pr = q === 'high' ? Math.min(devicePixelRatio, 2) : 1;
+  renderer.setPixelRatio(pr); composer.setPixelRatio(pr);
+  bloom.strength = bloomBase * (q === 'high' ? 1 : 0.64);
+  reflRT.setSize(q === 'high' ? 1024 : 512, q === 'high' ? 512 : 256);
+  onResize();
+  btnQ.textContent = q === 'high' ? '✦ 画质 · 高' : '✦ 画质 · 流畅';
+}
+function toggleWeather() {
+  if (transitioning) return;                        // 3 秒渐变期间锁定切换
+  const next = MODE_ORDER[(MODE_ORDER.indexOf(weather) + 1) % MODE_ORDER.length];
+  startTransition(next);
+  btnW.textContent = MODE_LABEL[next];
+  btnW.classList.add('on');
+  quoteEl.classList.remove('show');                 // 旧感悟先淡出
+}
+
+/* —— 背景音乐（浪漫钢琴）：首次任意交互自动响起，按钮或 M 键开关 —— */
+const bgm = document.getElementById('bgm');
+let bgmOn = true, bgmStarted = false;
+const BGM_VOL = 0.35;
+function bgmStart() {
+  if (bgmStarted || !bgmOn) return;
+  bgmStarted = true;
+  const t0 = performance.now();
+  bgm.volume = 0;
+  bgm.play().then(() => {
+    const tick = () => {                     // 2.5 秒渐入（用定时器：rAF 被宿主挂起时也能完成）
+      if (!bgmOn) return;
+      const k = Math.min((performance.now() - t0) / 2500, 1);
+      bgm.volume = BGM_VOL * k * k;
+      if (k < 1) setTimeout(tick, 40);
+    };
+    tick();
+  }).catch(() => { bgmStarted = false; });
+}
+function bgmToggle() {
+  bgmOn = !bgmOn;
+  btnB.textContent = bgmOn ? '🎵 音乐 · 开' : '🎵 音乐 · 关';
+  btnB.classList.toggle('on', bgmOn);
+  if (bgmOn) { bgmStarted = false; bgmStart(); }
+  else {
+    const fade = setInterval(() => {         // 渐出后暂停
+      bgm.volume = Math.max(0, bgm.volume - 0.06);
+      if (bgm.volume <= 0.002) { clearInterval(fade); bgm.pause(); }
+    }, 60);
+  }
+}
+// 浏览器自动播放策略要求用户手势：任意首次点击/按键即触发
+addEventListener('pointerdown', bgmStart, { once: true, capture: true });
+addEventListener('keydown', bgmStart, { once: true, capture: true });
+// 音频文件缺失/加载失败时优雅降级（开源仓库不含该音频，见 README）
+bgm.addEventListener('error', () => {
+  btnB.textContent = '🎵 音乐 · 无';
+  btnB.disabled = true; btnB.style.opacity = .45;
+});
+
+btnPause.onclick = togglePause; btnCam.onclick = toggleCam;
+btnQ.onclick = () => setQuality(quality === 'high' ? 'med' : 'high');
+btnW.onclick = toggleWeather;
+btnB.onclick = bgmToggle;
+addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); togglePause(); }
+  if (e.code === 'KeyC') toggleCam();
+  if (e.code === 'KeyW') toggleWeather();
+  if (e.code === 'KeyM') bgmToggle();
+  if (e.code === 'KeyQ') btnQ.onclick();
+});
+
+function onResize() {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h); composer.setSize(w, h);
+  const pr = renderer.getPixelRatio();
+  fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+}
+addEventListener('resize', onResize);
+setQuality('high');
+applyState(resolveState(PRESETS[weather]));   // 默认进入晚霞模式
+btnW.textContent = MODE_LABEL[weather]; btnW.classList.add('on');
+quoteEl.textContent = QUOTES[weather]; quoteEl.classList.add('show');
+
+/* ============================================================
+   主循环
+   ============================================================ */
+const SHIP_SPEED = 1.7;
+let simT = 0, lastT = performance.now() / 1000, fpsEMA = 60, fpsShown = 0, autoDropped = false, frames = 0;
+let rafFrames = 0;
+let buoyY = 0, buoyP = 0, buoyR = 0;
+
+function animateCore(viaRaf) {
+  const now = performance.now() / 1000;
+  let dt = Math.min(now - lastT, 0.05); lastT = now;
+  frames++;
+  if (viaRaf) rafFrames++;
+  const rdt = paused ? 0 : dt;
+  simT += rdt;
+
+  // 帧率统计/自动降级只认 rAF 驱动的帧：看门狗补帧前重置了 lastT，其 dt≈0 会把 EMA 拉成假数据
+  if (viaRaf) {
+    const fps = 1 / Math.max(dt, 1e-4);
+    if (dt > 0.001) fpsEMA += (fps - fpsEMA) * 0.05;
+    if (!autoDropped && simT > 5 && fpsEMA < 30 && quality === 'high') { autoDropped = true; setQuality('med'); }
+    if (now - fpsShown > 0.5) { fpsShown = now; document.getElementById('fps').textContent = Math.round(fpsEMA) + ' fps'; }
+  }
+
+  // —— 天气 3 秒渐变（真实时钟推进：即使 rAF 被宿主挂起，看门狗帧也能走完过渡）——
+  if (transitioning) {
+    const nowMs = performance.now();
+    weatherT = Math.min(weatherT + (nowMs - wLastAt) / 3000, 1);
+    wLastAt = nowMs;
+    applyState(lerpState(wFromState, wToState, weatherT * weatherT * (3 - 2 * weatherT)));
+    if (weatherT >= 1) {
+      transitioning = false;
+      applyState(wToState);
+      quoteEl.textContent = QUOTES[weather];
+      quoteEl.classList.add('show');
+    }
+  }
+
+  // —— 船航行 + 浮沉 ——
+  ship.position.x += SHIP_SPEED * rdt;
+  const px = ship.position.x, pz = ship.position.z;
+  if (rdt > 0) {
+    const hB = waveHeight(px + 6.5, pz, simT), hS = waveHeight(px - 6.5, pz, simT);
+    const hP = waveHeight(px, pz + 2.0, simT), hT = waveHeight(px, pz - 2.0, simT);
+    const k = 1 - Math.exp(-dt * 2.4);
+    buoyY += (((hB + hS + hP + hT) / 4 + 0.14) - buoyY) * k;
+    buoyP += ((Math.atan2(hB - hS, 13) * 0.85) - buoyP) * k;
+    buoyR += ((Math.atan2(hP - hT, 4) * 0.55 + 0.058) - buoyR) * k;
+    ship.position.y = buoyY;
+    ship.rotation.z = buoyP; ship.rotation.x = buoyR;
+    ship.rotation.y = 0.03 * Math.sin(simT * 0.10) + 0.02 * Math.sin(simT * 0.031 + 2);
+  }
+
+  // —— 风的阵风强度 ——
+  const gust = THREE.MathUtils.clamp(0.62 + 0.30 * Math.sin(simT * 0.13) + 0.22 * Math.sin(simT * 0.37 + 1.7), 0.25, 1.3);
+
+  // —— 海洋跟随（网格对齐，不产生波纹游动） ——
+  const ox = Math.round(px / OCEAN_GRID) * OCEAN_GRID, oz = Math.round(pz / OCEAN_GRID) * OCEAN_GRID;
+  ocean.position.set(ox, 0, oz);
+  oceanMat.uniforms.uOffset.value.set(ox, oz);
+  oceanMat.uniforms.uShipPos.value.set(px, pz);
+  oceanMat.uniforms.uShipRot.value = ship.rotation.y;
+  oceanMat.uniforms.uTime.value = simT;
+  oceanMat.uniforms.uCamPos.value.copy(camera.position);
+  sky.position.copy(camera.position);
+  skyMat.uniforms.uTime.value = simT;
+
+  // —— 帆 / 旗 ——
+  sailUniforms.uTime.value = simT; sailUniforms.uGust.value = gust;
+  sailUniforms.uCamPos.value.copy(camera.position);
+  flagMat.uniforms.uTime.value = simT;
+  wakeUniforms.uTime.value = simT;
+
+  // —— 尾迹 ——
+  if (rdt > 0) {
+    wakeAcc += rdt;
+    const sternX = px - 8.2, sternZ = pz + Math.sin(ship.rotation.y) * -1.5;
+    const last = wakePts[wakePts.length - 1];
+    if (!last || Math.hypot(sternX - last.x, sternZ - last.z) > 0.5 || wakeAcc > 0.4) {
+      wakeAcc = 0;
+      wakePts.push({ x: sternX, z: sternZ, t: simT });
+      if (wakePts.length > WAKE_MAX) wakePts.shift();
+    }
+    while (wakePts.length && simT - wakePts[0].t > 30) wakePts.shift();
+  }
+  {
+    const n = wakePts.length;
+    for (let i = 0; i < n; i++) {
+      const p = wakePts[i], age = (simT - p.t) / 30;
+      const w = 1.3 + age * 9.0;
+      const nxt = wakePts[Math.min(i + 1, n - 1)], prv = wakePts[Math.max(i - 1, 0)];
+      let dx = nxt.x - prv.x, dz = nxt.z - prv.z;
+      const m = Math.hypot(dx, dz) || 1; dx /= m; dz /= m;
+      const nx = -dz, nz = dx;
+      const y1 = waveHeight(p.x + nx * w, p.z + nz * w, simT) + 0.07;
+      const y2 = waveHeight(p.x - nx * w, p.z - nz * w, simT) + 0.07;
+      const o = i * 6;
+      wakePos[o] = p.x + nx * w; wakePos[o + 1] = y1; wakePos[o + 2] = p.z + nz * w;
+      wakePos[o + 3] = p.x - nx * w; wakePos[o + 4] = y2; wakePos[o + 5] = p.z - nz * w;
+      const fade = Math.min(age * 7, 1) * Math.pow(1 - age, 1.5);
+      wakeFade[i * 2] = wakeFade[i * 2 + 1] = fade;
+      wakeSide[i * 2] = 1; wakeSide[i * 2 + 1] = -1;
+    }
+    wakeMesh.geometry.setDrawRange(0, Math.max(0, (n - 1) * 6));
+    wakeMesh.geometry.attributes.position.needsUpdate = true;
+    wakeMesh.geometry.attributes.aFade.needsUpdate = true;
+    wakeMesh.geometry.attributes.aSide.needsUpdate = true;
+    wakeMesh.visible = n > 2;
+  }
+
+  // —— 海鸟 ——
+  for (const b of birds) {
+    const u = b.userData, a = simT * u.sp + u.phase;
+    b.position.set(px + 20 + Math.cos(a) * u.r - a * 0.4 % 9, 9.5 + 2.2 * Math.sin(a * 1.7 + u.phase), -14 + Math.sin(a) * u.r);
+    b.rotation.y = -a + Math.PI / 2;
+    const flap = Math.sin(simT * 8.5 + u.phase) * (0.55 + 0.45 * Math.sin(simT * 0.5 + u.phase));
+    u.wl.rotation.x = flap; u.wr.rotation.x = -flap;
+  }
+
+  updateCamera(simT, dt);
+
+  // —— 平面反射 pass：镜像相机渲染场景（隐藏水面自身），供海洋着色器采样倒影 ——
+  ocean.visible = false;
+  const wakeVis = wakeMesh.visible; wakeMesh.visible = false;
+  reflCam.fov = camera.fov; reflCam.aspect = camera.aspect;
+  reflCam.near = camera.near; reflCam.far = camera.far;
+  reflCam.updateProjectionMatrix();
+  reflCam.position.set(camera.position.x, -camera.position.y, camera.position.z);
+  reflCam.up.set(camera.up.x, -camera.up.y, camera.up.z);
+  reflCam.lookAt(camTarget.x, -camTarget.y, camTarget.z);
+  reflCam.updateMatrixWorld();
+  reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
+  reflTexMatrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
+    .multiply(reflCam.projectionMatrix).multiply(reflCam.matrixWorldInverse);
+  oceanMat.uniforms.uReflMatrix.value.copy(reflTexMatrix);
+  flipSides(true);
+  renderer.setRenderTarget(reflRT);
+  renderer.render(scene, reflCam);
+  renderer.setRenderTarget(null);
+  flipSides(false);
+  ocean.visible = true; wakeMesh.visible = wakeVis;
+
+  composer.render();
+
+  window.__seek = t => { simT = t; };   // 调试：跳转运镜时间轴
+  window.__snapshot = () => {           // 调试：同步渲染并用 readPixels 读回画面（宿主合成器冻结/ drawImage 失效时仍可取景）
+    animateCore(false);
+    const src = renderer.domElement;
+    const gl = src.getContext('webgl2') || src.getContext('webgl');
+    const w = gl.drawingBufferWidth, h = gl.drawingBufferHeight;
+    const px = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d'), img = ctx.createImageData(w, h);
+    for (let y = 0; y < h; y++) img.data.set(px.subarray((h - 1 - y) * w * 4, (h - y) * w * 4), y * w * 4);
+    ctx.putImageData(img, 0, 0);
+    const c2 = document.createElement('canvas'); c2.width = 640; c2.height = Math.round(640 * h / w);
+    c2.getContext('2d').drawImage(c, 0, 0, c2.width, c2.height);
+    return c2.toDataURL('image/jpeg', 0.82);
+  };
+  // 遮罩只在 rAF 驱动并渲染两帧后揭开：rAF 被挂起时（内嵌 webview 后台节流）
+  // 看门狗帧虽执行了 WebGL 命令，合成器却未必上屏，提前揭罩就会露出黑画布
+  const veilEl = document.getElementById('veil');   // ?bare 模式下遮罩被移除，需判空
+  if (veilEl && viaRaf && rafFrames >= 2) veilEl.classList.add('hide');
+}
+
+// —— 帧调度：同步首帧 + 单飞 rAF + 看门狗 ——
+// 内嵌 webview 在后台/失焦时可能连 rAF 带定时器一起挂起：页面停在加载遮罩上。
+// 1) 模块执行时同步渲染首帧（此时渲染器必然活着），保证一打开就有画面；
+// 2) 看门狗在停帧后取消旧回调、补渲染一帧并重新调度。
+let rafId = 0, lastFrameAt = performance.now();
+window.__diag = { raf: 0, wd: 0, vis: [] };
+window.__dbg = { renderer, scene, camera, composer, ocean, sky, ship, skyMat, oceanMat };   // 调试：自动化排查用
+function scheduleFrame() { if (!rafId) rafId = requestAnimationFrame(runFrame); }
+function runFrame() {
+  rafId = 0; lastFrameAt = performance.now(); window.__diag.raf++;
+  try { animateCore(true); }
+  catch (e) {
+    console.error(e);
+    if (window.__errs.length < 30) window.__errs.push(String(e));
+    if (rafFrames < 3) window.__fail('渲染异常：' + (e && e.message ? e.message : e));
+  }
+  scheduleFrame();
+}
+try {
+  lastT = performance.now() / 1000;
+  animateCore(false);   // 同步预热一帧（提前编译着色器），遮罩留待 rAF 帧揭开
+} catch (e) { console.error(e); window.__errs.push('firstframe: ' + e); }
+window.__appReady = true;
+scheduleFrame();
+setInterval(() => {
+  window.__diag.wd++;
+  if (performance.now() - lastFrameAt > 900) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { lastT = performance.now() / 1000; animateCore(); }
+    catch (e) { if (window.__errs.length < 30) window.__errs.push('wd: ' + e); }
+    scheduleFrame();
+  }
+}, 450);
+// 用户任意输入（点击/移动/滚轮/按键）立即补渲染一帧并重新调度——
+// 内嵌浏览器面板呈现层冻结时，一次点击即可唤醒画面
+function wakeKick() {
+  if (performance.now() - lastFrameAt > 250) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+    try { lastT = performance.now() / 1000; animateCore(); } catch (e) { /* 已有看门狗兜底 */ }
+    scheduleFrame();
+  }
+}
+addEventListener('pointerdown', wakeKick, { passive: true });
+addEventListener('pointermove', wakeKick, { passive: true });
+addEventListener('wheel', wakeKick, { passive: true });
+addEventListener('keydown', wakeKick);
+// WebGL 上下文丢失/恢复提示
+renderer.domElement.addEventListener('webglcontextlost', (e) => {
+  e.preventDefault();
+  const el = document.getElementById('veilErr');
+  document.getElementById('veil').classList.remove('hide');
+  el.style.display = 'block'; el.textContent = '显卡 WebGL 上下文丢失，请刷新页面重试。';
+});
+renderer.domElement.addEventListener('webglcontextrestored', () => {
+  document.getElementById('veil').classList.add('hide');
+});
+document.addEventListener('visibilitychange', () => {
+  window.__diag.vis.push(document.visibilityState);
+  if (!document.hidden) { lastT = performance.now() / 1000; scheduleFrame(); }
+});
+</script>
+</body>
+</html>
