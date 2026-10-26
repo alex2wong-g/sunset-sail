@@ -121,8 +121,11 @@ window.__fail = (msg) => {
 };
 // 捕获阶段监听：能同时捕获到模块脚本/CDN 加载失败（这类错误不冒泡到 window）
 window.addEventListener('error', (ev) => {
-  const t = ev.target && ev.target.src ? ' 资源：' + ev.target.src : '';
-  window.__fail('加载失败：' + (ev.message || '资源加载错误') + t + ' —— 需联网加载 three.js CDN；若被广告拦截类扩展屏蔽，请用无痕窗口或换浏览器打开。');
+  const t = ev.target;
+  // 音频/图片等可选资源缺失不影响渲染（如 Pages 上未提供 bgm.mp3），不当作致命错误
+  if (t && t !== window && /^(AUDIO|VIDEO|IMG|SOURCE|TRACK)$/.test(t.tagName || '')) return;
+  const src = t && t.src ? ' 资源：' + t.src : '';
+  window.__fail('加载失败：' + (ev.message || '资源加载错误') + src + ' —— 需联网加载 three.js CDN；若被广告拦截类扩展屏蔽，请用无痕窗口或换浏览器打开。');
 }, true);
 window.addEventListener('unhandledrejection', (e) => window.__fail('脚本异常：' + (e.reason && e.reason.message ? e.reason.message : e.reason)));
 window.addEventListener('error', e => { if (window.__errs.length < 30) window.__errs.push((e.message || String(e)) + ' @' + (e.lineno || 0)); });
