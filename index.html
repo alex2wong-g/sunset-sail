@@ -1103,6 +1103,10 @@ addEventListener('pointerdown', bgmStart, { once: true, capture: true });
 addEventListener('keydown', bgmStart, { once: true, capture: true });
 // 音频文件缺失/加载失败时优雅降级（开源仓库不含该音频，见 README）
 bgm.addEventListener('error', markAudioUnavailable, true);
+// 音频加载失败的 error 事件可能早于模块执行（如静态站上根本没有 bgm.mp3），加载后补检一次
+for (const delay of [1200, 4000]) {
+  setTimeout(() => { if (bgm.error || bgm.networkState === 3) markAudioUnavailable(); }, delay);
+}
 
 btnPause.onclick = togglePause; btnCam.onclick = toggleCam;
 btnQ.onclick = () => setQuality(quality === 'high' ? 'med' : 'high');
