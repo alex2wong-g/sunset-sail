@@ -1025,6 +1025,7 @@ function startTransition(key) {
    ============================================================ */
 const btnPause = document.getElementById('btnPause'), btnCam = document.getElementById('btnCam'),
       btnQ = document.getElementById('btnQ'), btnW = document.getElementById('btnW'),
+      btnB = document.getElementById('btnB'),
       quoteEl = document.getElementById('quote'), hint = document.getElementById('hint');
 function togglePause() { paused = !paused; btnPause.textContent = paused ? '▶ 继续' : '⏸ 暂停'; btnPause.classList.toggle('on', paused); }
 function toggleCam() {
@@ -1053,10 +1054,19 @@ function toggleWeather() {
 
 /* —— 背景音乐（浪漫钢琴）：首次任意交互自动响起，按钮或 M 键开关 —— */
 const bgm = document.getElementById('bgm');
-let bgmOn = true, bgmStarted = false;
+let bgmOn = true, bgmStarted = false, bgmDead = false;
 const BGM_VOL = 0.35;
+function markAudioUnavailable() {
+  if (bgmDead) return;
+  bgmDead = true; bgmStarted = true;
+  btnB.textContent = '🎵 音乐 · 无';
+  btnB.disabled = true; btnB.style.opacity = .45;
+  btnB.title = '缺少 bgm.mp3（见 README）';
+}
 function bgmStart() {
   if (bgmStarted || !bgmOn) return;
+  // 音频缺失/不可解码时降级（开源仓库不含该音频，媒体 error 事件可能早于本脚本触发）
+  if (bgm.error || bgm.networkState === 3) { markAudioUnavailable(); return; }
   bgmStarted = true;
   const t0 = performance.now();
   bgm.volume = 0;
@@ -1068,7 +1078,10 @@ function bgmStart() {
       if (k < 1) setTimeout(tick, 40);
     };
     tick();
-  }).catch(() => { bgmStarted = false; });
+  }).catch(() => {
+    if (bgm.error || bgm.networkState === 3) markAudioUnavailable();
+    else bgmStarted = false;                 // 其它原因（如自动播放策略）留待下次手势重试
+  });
 }
 function bgmToggle() {
   bgmOn = !bgmOn;
@@ -1086,10 +1099,7 @@ function bgmToggle() {
 addEventListener('pointerdown', bgmStart, { once: true, capture: true });
 addEventListener('keydown', bgmStart, { once: true, capture: true });
 // 音频文件缺失/加载失败时优雅降级（开源仓库不含该音频，见 README）
-bgm.addEventListener('error', () => {
-  btnB.textContent = '🎵 音乐 · 无';
-  btnB.disabled = true; btnB.style.opacity = .45;
-});
+bgm.addEventListener('error', markAudioUnavailable, true);
 
 btnPause.onclick = togglePause; btnCam.onclick = toggleCam;
 btnQ.onclick = () => setQuality(quality === 'high' ? 'med' : 'high');
