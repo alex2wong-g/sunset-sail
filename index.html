@@ -556,13 +556,46 @@ const stationX = t => (0.5 - t) * SHIP_L;
     const w = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.30), winMat);
     w.position.set(cx - 0.01, 1.18, zc); w.rotation.y = -Math.PI / 2; ship.add(w);
   }
-  const portMat = new THREE.MeshStandardMaterial({ color: 0x170e08, emissive: 0xff9c4a, emissiveIntensity: 2.1, roughness: 0.5 });
+  // 舷侧炮窗：逐顶点吸附到船体放样曲面，贴住木板（旧版用平板按最大半宽悬在船壳外，且朝 ±X 侧对镜头）
+  const portMat = new THREE.MeshStandardMaterial({
+    color: 0x170e08, emissive: 0xff9c4a, emissiveIntensity: 2.1, roughness: 0.5, side: THREE.DoubleSide
+  });
+  const hullSAt = (t, y) => {                       // 截面参数 s：0 舷缘 → 1 龙骨
+    const k = Math.min(Math.max((y - sheerY(t)) / (keelY(t) - sheerY(t)), 0), 1);
+    return Math.asin(Math.pow(k, 1 / 1.25)) / (Math.PI / 2);
+  };
+  const hullPt = (t, s, side) => {
+    const ang = s * Math.PI / 2;
+    return new THREE.Vector3(
+      stationX(t),
+      sheerY(t) + (keelY(t) - sheerY(t)) * Math.pow(Math.sin(ang), 1.25),
+      side * halfW(t) * Math.pow(Math.cos(ang), 0.78)
+    );
+  };
+  const hullNrm = (t, s, side) => {
+    const e = 1e-3, p = hullPt(t, s, side);
+    const n = new THREE.Vector3().crossVectors(
+      hullPt(Math.min(t + e, 1), s, side).sub(p),
+      hullPt(t, Math.min(s + e, 1), side).sub(p)
+    );
+    if (n.lengthSq() < 1e-12) return new THREE.Vector3(0, 0, side);
+    n.normalize();
+    if (n.z * side < 0) n.negate();                 // 朝船外
+    return n;
+  };
   for (const xp of [-3.4, -1.7, 0, 1.7, 3.4]) {
-    const t2 = 0.5 - xp / SHIP_L;
     for (const side of [-1, 1]) {
-      const p = new THREE.Mesh(new THREE.PlaneGeometry(0.30, 0.22), portMat);
-      p.position.set(xp, 0.02, side * (halfW(t2) - 0.03));
-      p.rotation.y = side * Math.PI / 2; ship.add(p);
+      const g = new THREE.PlaneGeometry(0.30, 0.22, 4, 3);
+      const attr = g.attributes.position;
+      for (let i = 0; i < attr.count; i++) {
+        const x = xp + attr.getX(i), y = 0.30 + attr.getY(i);   // 甲板下方舷侧腰部，高出水线
+        const t = 0.5 - x / SHIP_L, s = hullSAt(t, y);
+        const p = hullPt(t, s, side), n = hullNrm(t, s, side);
+        attr.setXYZ(i, p.x + n.x * 0.015, p.y + n.y * 0.015, p.z + n.z * 0.015);
+      }
+      g.computeVertexNormals();
+      const m = new THREE.Mesh(g, portMat);
+      m.frustumCulled = false; ship.add(m);
     }
   }
   // 艉楼灯笼（发光球）
@@ -611,6 +644,7 @@ const sailMat = new THREE.ShaderMaterial({
   vertexShader: `
     uniform float uTime, uGust;
     attribute float aBelly;
+    attribute vec3 aTanU, aTanV, aBulgeDir;
     varying vec3 vNrm; varying vec3 vWorld; varying vec2 vUv;
     vec3 sailPos(vec2 uv, vec3 base){
       float u=uv.x, v=uv.y;
@@ -618,16 +652,21 @@ const sailMat = new THREE.ShaderMaterial({
       float flut=sin(u*22.0-uTime*9.0+v*6.0)*0.022*(0.25+v)*(0.4+0.6*uGust);
       float fold=sin(u*6.283+v*2.0)*0.016*sin(v*3.14159);
       vec3 p=base;
-      p.z+=belly+flut+fold;
-      p.x*=mix(1.0,0.86,v);              // 底边略收
+      p+=aBulgeDir*(belly+flut+fold);    // 沿帆面法线鼓出
+      p.z*=mix(1.0,0.86,v);              // 底边略收（帆宽方向是 z）
       return p;
     }
     void main(){
       vUv=uv;
+      const float E=0.01;
       vec3 p=sailPos(uv, position);
-      vec3 du=sailPos(uv+vec2(0.01,0.0), position)-p;
-      vec3 dv=sailPos(uv+vec2(0.0,0.01), position)-p;
-      vNrm=normalize(cross(du,dv));
+      // 有限差分只含鼓胀梯度，必须补上基准面切向；否则 cross(du,dv) 退化为零向量，
+      // normalize(0) 是未定义值（多数 GPU 返回 NaN），光照随帆面变成随机方块
+      vec3 du=sailPos(uv+vec2(E,0.0), position)-p+E*aTanU;
+      vec3 dv=sailPos(uv+vec2(0.0,E), position)-p+E*aTanV;
+      vec3 nrm=cross(du,dv);
+      float nl=length(nrm);
+      vNrm=nl>1e-6? nrm/nl : aBulgeDir;
       vec4 wp=modelMatrix*vec4(p,1.0);
       vWorld=wp.xyz;
       gl_Position=projectionMatrix*viewMatrix*wp;
@@ -660,8 +699,20 @@ const sailMat = new THREE.ShaderMaterial({
 function makeSquareSail(w, h, belly) {
   const g = new THREE.PlaneGeometry(w, h, 22, 14);
   g.rotateY(Math.PI / 2);   // 宽度沿 Z、法线朝 +X（船艏方向鼓出）
-  const b = new Float32Array(g.attributes.position.count).fill(belly);
+  const n = g.attributes.position.count;
+  const b = new Float32Array(n).fill(belly);
   g.setAttribute('aBelly', new THREE.BufferAttribute(b, 1));
+  // 基准面切向 + 鼓出方向：顶点着色器靠它们算出真实法线
+  const tU = new Float32Array(n * 3), tV = new Float32Array(n * 3), bd = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const o = i * 3;
+    tU[o] = 0; tU[o + 1] = 0; tU[o + 2] = -w;   // u 增大 → z 减小
+    tV[o] = 0; tV[o + 1] = -h; tV[o + 2] = 0;   // v 增大 → y 减小
+    bd[o] = 1; bd[o + 1] = 0; bd[o + 2] = 0;    // 鼓向 +X
+  }
+  g.setAttribute('aTanU', new THREE.BufferAttribute(tU, 3));
+  g.setAttribute('aTanV', new THREE.BufferAttribute(tV, 3));
+  g.setAttribute('aBulgeDir', new THREE.BufferAttribute(bd, 3));
   const m = new THREE.Mesh(g, sailMat);
   m.frustumCulled = false;
   return m;
@@ -716,11 +767,17 @@ rigPts.push(12.4, 2.38, 0, MASTS[0].x, MASTS[0].h + 0.5, 0,
 // —— 前帆（艏斜桅三角帆） ——
 {
   const A = new THREE.Vector3(12.35, 2.35, 0), B = new THREE.Vector3(4.95, 6.7, 0), C = new THREE.Vector3(5.7, 1.3, 0);
-  const n = 8, pos = [], uv = [], belly = [], idx = [];
+  const n = 8, pos = [], uv = [], belly = [], tanU = [], tanV = [], bdir = [], idx = [];
+  const AB = B.clone().sub(A), CA = C.clone().sub(A);
+  const baseN = new THREE.Vector3().crossVectors(AB, CA).normalize();   // 三角帆基准法线（大致 +Z）
   for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
     const u = i / n, v = j / n;
     const p = A.clone().lerp(B, u).lerp(C, v);
     pos.push(p.x, p.y, p.z); uv.push(u, v); belly.push(0.5);
+    const tu = AB.clone().multiplyScalar(1 - v);                        // ∂P/∂u
+    const tv = CA.clone().sub(AB.clone().multiplyScalar(u));            // ∂P/∂v
+    tanU.push(tu.x, tu.y, tu.z); tanV.push(tv.x, tv.y, tv.z);
+    bdir.push(baseN.x, baseN.y, baseN.z);
   }
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
     const a = i * (n + 1) + j, b = a + 1, c = a + n + 1, d = c + 1;
@@ -730,6 +787,9 @@ rigPts.push(12.4, 2.38, 0, MASTS[0].x, MASTS[0].h + 0.5, 0,
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   g.setAttribute('aBelly', new THREE.Float32BufferAttribute(belly, 1));
+  g.setAttribute('aTanU', new THREE.Float32BufferAttribute(tanU, 3));
+  g.setAttribute('aTanV', new THREE.Float32BufferAttribute(tanV, 3));
+  g.setAttribute('aBulgeDir', new THREE.Float32BufferAttribute(bdir, 3));
   g.setIndex(idx);
   const jib = new THREE.Mesh(g, sailMat); jib.frustumCulled = false; ship.add(jib);
 }
@@ -817,20 +877,70 @@ let wakeAcc = 0;
 /* 船体水线泡沫已并入海洋着色器（uShipPos/uShipRot 在浪面直接绘制，杜绝平面贴片穿模） */
 
 /* ============================================================
-   海鸟（剪影）
+   海鸥（白羽 + 深灰翼尖，有体积的鸥形）
    ============================================================ */
 const birds = [];
 {
-  const bMat = new THREE.MeshBasicMaterial({ color: 0x2b2118, side: THREE.DoubleSide });
+  // 鸥羽近白偏暖，带一点自发光：既保住逆光下的白色感，又不至于像贴纸一样死白
+  const gullMat = new THREE.MeshStandardMaterial({
+    color: 0xfbf7ef, roughness: 0.88, metalness: 0,
+    emissive: 0xfff1dc, emissiveIntensity: 0.22
+  });
+  const beakMat = new THREE.MeshStandardMaterial({ color: 0xd7a24c, roughness: 0.6 });
+
+  // 单侧翼：内翼平展、腕部之后强后掠，翼尖压深灰（海鸥的“折翼”剪影）
+  const wingGeo = new THREE.BufferGeometry();
+  wingGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+     0.075, 0.015, 0.040,   // 0 肩·前缘
+     0.100, 0.030, 0.340,   // 1 腕·前缘（略前突）
+    -0.150, 0.055, 0.760,   // 2 翼尖（强后掠、上翘）
+    -0.090, 0.014, 0.360,   // 3 腕·后缘
+    -0.095, 0.000, 0.040,   // 4 肩·后缘
+  ], 3));
+  wingGeo.setAttribute('color', new THREE.Float32BufferAttribute([
+    1.00, 1.00, 0.98,
+    0.93, 0.93, 0.91,
+    0.26, 0.27, 0.30,
+    0.84, 0.84, 0.83,
+    1.00, 1.00, 0.99,
+  ], 3));
+  wingGeo.setIndex([0, 1, 4, 1, 3, 4, 1, 2, 3]);
+  wingGeo.computeVertexNormals();
+  const wingMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff, roughness: 0.88, metalness: 0, vertexColors: true,
+    emissive: 0xfff1dc, emissiveIntensity: 0.18, side: THREE.DoubleSide
+  });
+
+  const bodyGeo = new THREE.SphereGeometry(0.072, 10, 7);
+  const headGeo = new THREE.SphereGeometry(0.048, 9, 7);
+  const beakGeo = new THREE.ConeGeometry(0.014, 0.062, 6);
+  const tailGeo = new THREE.BufferGeometry();
+  tailGeo.setAttribute('position', new THREE.Float32BufferAttribute(
+    [-0.16, 0.012, 0.0, -0.33, 0.018, 0.062, -0.33, 0.018, -0.062], 3));
+  tailGeo.setIndex([0, 1, 2]);
+  tailGeo.computeVertexNormals();
+
   for (let i = 0; i < 6; i++) {
     const g = new THREE.Group();
-    const wingGeo = new THREE.BufferGeometry();
-    wingGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, -0.72, 0.10, 0.30, -0.72, 0.10, -0.30], 3));
-    wingGeo.computeVertexNormals();
-    const l = new THREE.Mesh(wingGeo, bMat), r = new THREE.Mesh(wingGeo, bMat);
-    r.scale.z = -1; g.add(l, r);
+    const body = new THREE.Mesh(bodyGeo, gullMat);
+    body.scale.set(2.5, 0.66, 0.62); body.position.set(-0.03, 0.015, 0);
+    const head = new THREE.Mesh(headGeo, gullMat); head.position.set(0.175, 0.045, 0);
+    const beak = new THREE.Mesh(beakGeo, beakMat);
+    beak.position.set(0.245, 0.032, 0); beak.rotation.z = -Math.PI / 2;
+    const tail = new THREE.Mesh(tailGeo, gullMat);
+    // 翼根做成可转动的枢轴，扇翅只动枢轴
+    const wl = new THREE.Group(), wr = new THREE.Group();
+    wl.position.set(0.02, 0.03, -0.045); wr.position.set(0.02, 0.03, 0.045);
+    const lw = new THREE.Mesh(wingGeo, wingMat); lw.scale.z = -1;  // -Z 侧镜像
+    const rw = new THREE.Mesh(wingGeo, wingMat);
+    wl.add(lw); wr.add(rw);
+    g.add(body, head, beak, tail, wl, wr);
     g.scale.setScalar(0.9 + Math.random() * 0.5);
-    g.userData = { phase: Math.random() * 20, r: 9 + Math.random() * 10, sp: 0.25 + Math.random() * 0.12, wl: l, wr: r };
+    g.userData = {
+      phase: Math.random() * 20, r: 9 + Math.random() * 5,   // 半径上限压住，避免盘旋时穿过桅杆索具
+      sp: 0.25 + Math.random() * 0.12, vsp: 0.8 + Math.random() * 0.6,
+      wl, wr
+    };
     birds.push(g); scene.add(g);
   }
 }
@@ -1243,13 +1353,17 @@ function animateCore(viaRaf) {
     wakeMesh.visible = n > 2;
   }
 
-  // —— 海鸟 ——
+  // —— 海鸥：绕船盘旋，机头按相对速度指向，间歇扇翅（多数时间滑翔）——
   for (const b of birds) {
     const u = b.userData, a = simT * u.sp + u.phase;
-    b.position.set(px + 20 + Math.cos(a) * u.r - a * 0.4 % 9, 9.5 + 2.2 * Math.sin(a * 1.7 + u.phase), -14 + Math.sin(a) * u.r);
-    b.rotation.y = -a + Math.PI / 2;
-    const flap = Math.sin(simT * 8.5 + u.phase) * (0.55 + 0.45 * Math.sin(simT * 0.5 + u.phase));
-    u.wl.rotation.x = flap; u.wr.rotation.x = -flap;
+    b.position.set(px + 20 + Math.cos(a) * u.r,
+                   9.5 + 2.2 * Math.sin(a * 1.7 + u.phase),
+                   -14 + Math.sin(a) * u.r * 0.85);
+    b.rotation.y = Math.atan2(-Math.cos(a) * 0.85, -Math.sin(a));   // 局部 +X 是机头
+    const burst = Math.max(0, Math.sin(simT * 0.31 + u.phase * 1.7));
+    const flap = Math.sin(simT * 7.4 * u.vsp + u.phase) * (0.10 + 0.42 * burst * burst);
+    u.wr.rotation.x = -0.15 - flap;      // 常态带一点上反角
+    u.wl.rotation.x = 0.15 + flap;
   }
 
   updateCamera(simT, dt);
