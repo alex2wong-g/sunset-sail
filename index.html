@@ -260,6 +260,7 @@ composer.addPass(vignette);
 const reflRT = new THREE.WebGLRenderTarget(1024, 512);
 const reflCam = new THREE.PerspectiveCamera();
 const reflTexMatrix = new THREE.Matrix4();
+let lastReflectionAt = -Infinity;
 const sideSwap = new Map();
 function flipSides(on) {
   scene.traverse(o => {
@@ -334,9 +335,10 @@ scene.add(sky);
 /* ============================================================
    海洋：Gerstner 波浪顶点位移 + 白顶泡沫 + 太阳金色波光
    ============================================================ */
-const OCEAN_SIZE = 1600, OCEAN_SEG = 512;
-const OCEAN_GRID = OCEAN_SIZE / OCEAN_SEG;
-const oceanGeo = new THREE.PlaneGeometry(OCEAN_SIZE, OCEAN_SIZE, OCEAN_SEG, OCEAN_SEG);
+const OCEAN_SIZE = 1600, OCEAN_SEG_HIGH = 512, OCEAN_SEG_MED = 384;
+let oceanSegments = OCEAN_SEG_HIGH;
+let OCEAN_GRID = OCEAN_SIZE / oceanSegments;
+const oceanGeo = new THREE.PlaneGeometry(OCEAN_SIZE, OCEAN_SIZE, oceanSegments, oceanSegments);
 oceanGeo.rotateX(-Math.PI / 2);
 
 const oceanMat = new THREE.ShaderMaterial({
@@ -975,6 +977,7 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; controls.dampingFactor = 0.08;
 controls.minDistance = 8; controls.maxDistance = 140;
 controls.maxPolarAngle = 1.53; controls.enabled = false;
+controls.addEventListener('change', () => { if (paused) scheduleFrame(); });
 
 let autoCam = true, paused = false, quality = 'high', bloomBase = 0.55;
 const _v1 = new THREE.Vector3(), _v2 = new THREE.Vector3(), _v3 = new THREE.Vector3();
@@ -1140,7 +1143,13 @@ const btnPause = document.getElementById('btnPause'), btnCam = document.getEleme
       btnQ = document.getElementById('btnQ'), btnW = document.getElementById('btnW'),
       btnB = document.getElementById('btnB'),
       quoteEl = document.getElementById('quote'), hint = document.getElementById('hint');
-function togglePause() { paused = !paused; btnPause.textContent = paused ? '▶ 继续' : '⏸ 暂停'; btnPause.classList.toggle('on', paused); }
+function togglePause() {
+  paused = !paused;
+  btnPause.textContent = paused ? '▶ 继续' : '⏸ 暂停';
+  btnPause.classList.toggle('on', paused);
+  if (paused && !transitioning && rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  else scheduleFrame();
+}
 function toggleCam() {
   autoCam = !autoCam; controls.enabled = !autoCam;
   btnCam.textContent = autoCam ? '🎥 自动运镜' : '🎥 自由视角';
@@ -1149,12 +1158,23 @@ function toggleCam() {
 }
 function setQuality(q) {
   quality = q;
-  const pr = q === 'high' ? Math.min(devicePixelRatio, 2) : 1;
+  const pr = q === 'high' ? Math.min(devicePixelRatio, 1.5) : 1;
   renderer.setPixelRatio(pr); composer.setPixelRatio(pr);
   bloom.strength = bloomBase * (q === 'high' ? 1 : 0.64);
   reflRT.setSize(q === 'high' ? 1024 : 512, q === 'high' ? 512 : 256);
+  const segments = q === 'high' ? OCEAN_SEG_HIGH : OCEAN_SEG_MED;
+  if (segments !== oceanSegments) {
+    const geometry = new THREE.PlaneGeometry(OCEAN_SIZE, OCEAN_SIZE, segments, segments);
+    geometry.rotateX(-Math.PI / 2);
+    ocean.geometry.dispose();
+    ocean.geometry = geometry;
+    oceanSegments = segments;
+    OCEAN_GRID = OCEAN_SIZE / segments;
+  }
+  lastReflectionAt = -Infinity;
   onResize();
   btnQ.textContent = q === 'high' ? '✦ 画质 · 高' : '✦ 画质 · 流畅';
+  if (window.__appReady) scheduleFrame();
 }
 function toggleWeather() {
   if (transitioning) return;                        // 3 秒渐变期间锁定切换
@@ -1163,6 +1183,7 @@ function toggleWeather() {
   btnW.textContent = MODE_LABEL[next];
   btnW.classList.add('on');
   quoteEl.classList.remove('show');                 // 旧感悟先淡出
+  scheduleFrame();
 }
 
 /* —— 背景音乐（浪漫钢琴）：首次任意交互自动响起，按钮或 M 键开关 —— */
@@ -1236,6 +1257,7 @@ function onResize() {
   renderer.setSize(w, h); composer.setSize(w, h);
   const pr = renderer.getPixelRatio();
   fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+  if (window.__appReady) scheduleFrame();
 }
 addEventListener('resize', onResize);
 setQuality('high');
@@ -1368,26 +1390,33 @@ function animateCore(viaRaf) {
 
   updateCamera(simT, dt);
 
-  // —— 平面反射 pass：镜像相机渲染场景（隐藏水面自身），供海洋着色器采样倒影 ——
-  ocean.visible = false;
-  const wakeVis = wakeMesh.visible; wakeMesh.visible = false;
-  reflCam.fov = camera.fov; reflCam.aspect = camera.aspect;
-  reflCam.near = camera.near; reflCam.far = camera.far;
-  reflCam.updateProjectionMatrix();
-  reflCam.position.set(camera.position.x, -camera.position.y, camera.position.z);
-  reflCam.up.set(camera.up.x, -camera.up.y, camera.up.z);
-  reflCam.lookAt(camTarget.x, -camTarget.y, camTarget.z);
-  reflCam.updateMatrixWorld();
-  reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
-  reflTexMatrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
-    .multiply(reflCam.projectionMatrix).multiply(reflCam.matrixWorldInverse);
-  oceanMat.uniforms.uReflMatrix.value.copy(reflTexMatrix);
-  flipSides(true);
-  renderer.setRenderTarget(reflRT);
-  renderer.render(scene, reflCam);
-  renderer.setRenderTarget(null);
-  flipSides(false);
-  ocean.visible = true; wakeMesh.visible = wakeVis;
+  // The reflection can update less often than the main view without affecting the wave animation.
+  const reflectionInterval = quality === 'high' ? 1000 / 30 : 1000 / 20;
+  if (performance.now() - lastReflectionAt >= reflectionInterval) {
+    ocean.visible = false;
+    const wakeVis = wakeMesh.visible; wakeMesh.visible = false;
+    reflCam.fov = camera.fov; reflCam.aspect = camera.aspect;
+    reflCam.near = camera.near; reflCam.far = camera.far;
+    reflCam.updateProjectionMatrix();
+    reflCam.position.set(camera.position.x, -camera.position.y, camera.position.z);
+    reflCam.up.set(camera.up.x, -camera.up.y, camera.up.z);
+    reflCam.lookAt(camTarget.x, -camTarget.y, camTarget.z);
+    reflCam.updateMatrixWorld();
+    reflCam.matrixWorldInverse.copy(reflCam.matrixWorld).invert();
+    reflTexMatrix.set(0.5, 0, 0, 0.5, 0, 0.5, 0, 0.5, 0, 0, 0.5, 0.5, 0, 0, 0, 1)
+      .multiply(reflCam.projectionMatrix).multiply(reflCam.matrixWorldInverse);
+    oceanMat.uniforms.uReflMatrix.value.copy(reflTexMatrix);
+    try {
+      flipSides(true);
+      renderer.setRenderTarget(reflRT);
+      renderer.render(scene, reflCam);
+      lastReflectionAt = performance.now();
+    } finally {
+      renderer.setRenderTarget(null);
+      flipSides(false);
+      ocean.visible = true; wakeMesh.visible = wakeVis;
+    }
+  }
 
   composer.render();
 
@@ -1424,7 +1453,9 @@ function animateCore(viaRaf) {
 let rafId = 0, lastFrameAt = performance.now();
 window.__diag = { raf: 0, wd: 0, vis: [] };
 window.__dbg = { renderer, scene, camera, composer, ocean, sky, ship, skyMat, oceanMat };   // 调试：自动化排查用
-function scheduleFrame() { if (!rafId) rafId = requestAnimationFrame(runFrame); }
+function scheduleFrame() {
+  if (!rafId && !document.hidden) rafId = requestAnimationFrame(runFrame);
+}
 function runFrame() {
   rafId = 0; lastFrameAt = performance.now(); window.__diag.raf++;
   try { animateCore(true); }
@@ -1433,7 +1464,7 @@ function runFrame() {
     if (window.__errs.length < 30) window.__errs.push(String(e));
     if (rafFrames < 3) window.__fail('渲染异常：' + (e && e.message ? e.message : e));
   }
-  scheduleFrame();
+  if (!paused || transitioning) scheduleFrame();
 }
 try {
   lastT = performance.now() / 1000;
@@ -1443,6 +1474,7 @@ window.__appReady = true;
 scheduleFrame();
 setInterval(() => {
   window.__diag.wd++;
+  if (document.hidden || (paused && !transitioning)) return;
   if (performance.now() - lastFrameAt > 900) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     try { lastT = performance.now() / 1000; animateCore(); }
@@ -1453,6 +1485,7 @@ setInterval(() => {
 // 用户任意输入（点击/移动/滚轮/按键）立即补渲染一帧并重新调度——
 // 内嵌浏览器面板呈现层冻结时，一次点击即可唤醒画面
 function wakeKick() {
+  if (document.hidden || (paused && !transitioning)) return;
   if (performance.now() - lastFrameAt > 250) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     try { lastT = performance.now() / 1000; animateCore(); } catch (e) { /* 已有看门狗兜底 */ }
@@ -1475,7 +1508,12 @@ renderer.domElement.addEventListener('webglcontextrestored', () => {
 });
 document.addEventListener('visibilitychange', () => {
   window.__diag.vis.push(document.visibilityState);
-  if (!document.hidden) { lastT = performance.now() / 1000; scheduleFrame(); }
+  if (document.hidden) {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+  } else {
+    lastT = performance.now() / 1000;
+    scheduleFrame();
+  }
 });
 </script>
 </body>
