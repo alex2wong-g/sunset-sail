@@ -1257,6 +1257,7 @@ function onResize() {
   renderer.setSize(w, h); composer.setSize(w, h);
   const pr = renderer.getPixelRatio();
   fxaa.material.uniforms.resolution.value.set(1 / (w * pr), 1 / (h * pr));
+  if (window.__appReady) scheduleFrame();
 }
 addEventListener('resize', onResize);
 setQuality('high');
